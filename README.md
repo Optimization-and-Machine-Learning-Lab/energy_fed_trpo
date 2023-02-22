@@ -46,6 +46,7 @@
     <li>
       <a href="#about-the-project">About The Project</a>
     </li>
+    <li><a href="#maths">Math</a></li>
     <li><a href="#contact">Contact</a></li>
     <li><a href="#acknowledgements">Acknowledgements</a></li>
   </ol>
@@ -58,6 +59,9 @@
 
 TRPO optimization algorithm applied in federated learning framework for Microgrid management .
 
+<!-- MATH -->
+## Maths
+<img src="assets/formula_trpo.jpeg" alt="Logo" >
 
 <!-- CONTACT -->
 ## Contact
@@ -71,5 +75,8 @@ Roberto Guillen - rgtzgn@gmail.com
 
 Thanks [Martin Takáč](https://mtakac.com/) and [Samuel Horvath](https://samuelhorvath.github.io/) for providing valuable guidance and advice.
 
+
+<!-- SOURCES -->
 Image source: https://optimization.mccormick.northwestern.edu/index.php/Trust-region_methods
+Formula source: https://www.linkedin.com/pulse/reinforcement-learning-approaches-beginners-navin-manaswi/
 
