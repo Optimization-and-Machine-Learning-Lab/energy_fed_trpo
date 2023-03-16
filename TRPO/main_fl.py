@@ -1,5 +1,6 @@
 import argparse
 from itertools import count
+from collections import namedtuple
 
 import scipy.optimize
 
@@ -16,13 +17,15 @@ sys.path.append('../CityLearn/')
 from citylearn.citylearn import CityLearnEnv
 
 building_count = 5
+Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state',
+                                       'reward'))
 
 # env_name = "Humanoid-v4"
 wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_test")
-    wandb.run.name = "TRPO_fl_train_24"
+    wandb.run.name = "TRPO_just_a_test"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -58,14 +61,14 @@ schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_chal
 # env = gym.make(args.env_name)
 env = CityLearnEnv(schema_filepath)
 
-num_inputs = env.observation_space[0].shape[0] + 5
+num_inputs = env.observation_space[0].shape[0] + building_count
 num_actions = env.action_space[0].shape[0]
 
 # env.seed(args.seed)
 # torch.manual_seed(args.seed)
 
-policy_nets = [Policy(num_inputs, num_actions) for _ in range(building_count)]
-value_nets = [Value(num_inputs) for _ in range(building_count)]
+policy_nets = Policy(num_inputs, num_actions)
+value_nets = Value(num_inputs)
 
 def syn_model(models):
     state_dict = models[0].state_dict()
@@ -176,7 +179,7 @@ for i_episode in count(1):
 
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
-            action = [select_action(state[b], policy_nets[b]).data[0].numpy() for b in range(building_count)]
+            action = [select_action(state[b], policy_nets).data[0].numpy() for b in range(building_count)]
             next_state, reward, done, _ = env.step(action)
             # wandb_step += 1
             reward_sum += reward
@@ -201,20 +204,18 @@ for i_episode in count(1):
 
     # train
     wandb_step += 1     # count training step
+    batch = []
     for b in range(building_count):
         reward_batch[b] /= num_episodes
-        batch = memories[b].sample()
-        update_params(batch, policy_nets[b], value_nets[b])
-
+        batch += memories[b].sample()
         if i_episode % args.log_interval == 0:
             print('Episode {}\tLast reward: {}\tAverage reward {:.2f}'.format(
                 i_episode, reward_sum[b], reward_batch[b]))
             if wandb_record:
                 wandb.log({"eval_"+str(b+1): reward_sum[b]}, step = int(wandb_step))
-    
-    # if i_episode & 10 == 0:
-    syn_model(value_nets)
-    syn_model(policy_nets)
-        # syn_count += 1
+
+    batch = Transition(*zip(*batch))
+    update_params(batch, policy_nets, value_nets)
+
     if i_episode > 1000:
         break

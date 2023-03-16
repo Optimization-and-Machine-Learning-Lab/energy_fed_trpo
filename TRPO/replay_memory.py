@@ -17,7 +17,8 @@ class Memory(object):
         self.memory.append(Transition(*args))
 
     def sample(self):
-        return Transition(*zip(*self.memory))
+        # return Transition(*zip(*self.memory))
+        return self.memory
 
     def __len__(self):
         return len(self.memory)
