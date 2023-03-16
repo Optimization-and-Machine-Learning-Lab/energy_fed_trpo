@@ -20,5 +20,8 @@ class Memory(object):
         # return Transition(*zip(*self.memory))
         return self.memory
 
+    def sample_batch(self):
+        return Transition(*zip(*self.memory))
+
     def __len__(self):
         return len(self.memory)

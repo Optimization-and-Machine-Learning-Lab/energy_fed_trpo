@@ -1,7 +1,8 @@
+# run simple TRPO on all five buildings, plot a baseline
 import argparse
 from itertools import count
-from collections import namedtuple
 
+import gym
 import scipy.optimize
 
 import torch
@@ -16,16 +17,14 @@ import sys
 sys.path.append('../CityLearn/')
 from citylearn.citylearn import CityLearnEnv
 
-building_count = 7
-Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state',
-                                       'reward'))
+building_count = 5
 
 # env_name = "Humanoid-v4"
 wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_test")
-    wandb.run.name = "TRPO_ph3"
+    wandb.run.name = "TRPO_ph2_baseline"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -48,42 +47,32 @@ parser.add_argument('--damping', type=float, default=1e-1, metavar='G',
                     help='damping (default: 1e-1)')
 parser.add_argument('--seed', type=int, default=543, metavar='N',
                     help='random seed (default: 1)')
-parser.add_argument('--batch-size', type=int, default=1500, metavar='N',
+parser.add_argument('--batch-size', type=int, default=15000, metavar='N',
                     help='random seed (default: 1)')
 parser.add_argument('--render', action='store_true',
                     help='render the environment')
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_challenge_2022_phase_3/schema.json'
+schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_challenge_2022_phase_2/schema.json'
 # args.env_name = env_name
 
 # env = gym.make(args.env_name)
 env = CityLearnEnv(schema_filepath)
 
-num_inputs = env.observation_space[0].shape[0] + building_count
+# print(env.observation_space)
+num_inputs = env.observation_space[0].shape[0]
 num_actions = env.action_space[0].shape[0]
 
 # env.seed(args.seed)
 # torch.manual_seed(args.seed)
 
-policy_net = Policy(num_inputs, num_actions)
-value_net = Value(num_inputs)
+policy_nets = [Policy(num_inputs, num_actions) for i in range(building_count)]
+value_nets = [Value(num_inputs) for i in range(building_count)]
 
-def syn_model(models):
-    state_dict = models[0].state_dict()
-    mean_model = {}
-
-    for layer in state_dict.keys():
-        par_mean = torch.stack([models[i].state_dict()[layer] for i in range(building_count)], axis=0).mean(axis=0)
-        mean_model[layer] = par_mean.clone()
-    for m in models:
-        for name, params in m.named_parameters():
-            params.data.copy_(mean_model[name])
-
-def select_action(state, model):
+def select_action(state, policy_net):
     state = torch.from_numpy(state).unsqueeze(0)
-    action_mean, _, action_std = model(Variable(state))
+    action_mean, _, action_std = policy_net(Variable(state))
     action = torch.normal(action_mean, action_std)
     return action
 
@@ -167,25 +156,22 @@ running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_c
 for i_episode in count(1):
     memories = [Memory() for _ in range(building_count)]
 
+    num_steps = 0
     reward_batch = np.array([0.] * building_count)
     num_episodes = 0
-
-    # get data
-    num_steps = 0
-
-    while num_steps < args.batch_size:  # 15000
-        state = env.reset()     # list of lists
-        state = [running_state[i](state[i]) for i in range(building_count)]
+    while num_steps < args.batch_size:
+        state = env.reset()
+        state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
 
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
-            action = [select_action(state[b], policy_net).data[0].numpy() for b in range(building_count)]
+            action = [select_action(state[b], policy_nets[b]).data[0].numpy() for b in range(building_count)]
+            # action = action.data[0].numpy()
             next_state, reward, done, _ = env.step(action)
             # wandb_step += 1
             reward_sum += reward
 
-            next_state = [running_state[i](next_state[i]) for i in range(building_count)]
-            # next_state = running_state(next_state)
+            next_state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
 
             mask = 1
             if done:
@@ -194,6 +180,8 @@ for i_episode in count(1):
             for b in range(building_count):
                 memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b])
 
+            if args.render:
+                env.render()
             if done:
                 break
 
@@ -202,20 +190,17 @@ for i_episode in count(1):
         num_episodes += 1
         reward_batch += reward_sum
 
-    # train
     wandb_step += 1     # count training step
     batch = []
     for b in range(building_count):
         reward_batch[b] /= num_episodes
-        batch += memories[b].sample()
+        batch = memories[b].sample_batch()
+        update_params(batch, policy_nets[b], value_nets[b])
+
         if i_episode % args.log_interval == 0:
             print('Episode {}\tLast reward: {}\tAverage reward {:.2f}'.format(
                 i_episode, reward_sum[b], reward_batch[b]))
             if wandb_record:
                 wandb.log({"eval_"+str(b+1): reward_sum[b]}, step = int(wandb_step))
-
-    batch = Transition(*zip(*batch))
-    update_params(batch, policy_net, value_net)
-
-    if i_episode > 1000:
+    if i_episode > 10000:
         break

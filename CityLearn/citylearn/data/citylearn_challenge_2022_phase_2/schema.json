@@ -214,7 +214,7 @@
       }
     },
     "Building_7": {
-      "include": false,
+      "include": true,
       "energy_simulation": "Building_7.csv",
       "weather": "weather.csv",
       "carbon_intensity": "carbon_intensity.csv",
@@ -241,7 +241,7 @@
       }
     },
     "Building_8": {
-      "include": false,
+      "include": true,
       "energy_simulation": "Building_8.csv",
       "weather": "weather.csv",
       "carbon_intensity": "carbon_intensity.csv",
@@ -268,7 +268,7 @@
       }
     },
     "Building_9": {
-      "include": false,
+      "include": true,
       "energy_simulation": "Building_9.csv",
       "weather": "weather.csv",
       "carbon_intensity": "carbon_intensity.csv",
@@ -295,7 +295,7 @@
       }
     },
     "Building_10": {
-      "include": false,
+      "include": true,
       "energy_simulation": "Building_10.csv",
       "weather": "weather.csv",
       "carbon_intensity": "carbon_intensity.csv",
