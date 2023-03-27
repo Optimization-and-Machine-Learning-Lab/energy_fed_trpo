@@ -1,3 +1,4 @@
-*/wandb
-*/__pycache__
+wandb/
+__pycache__/
 banma.py
+.vscode
