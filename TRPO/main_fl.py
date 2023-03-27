@@ -16,7 +16,7 @@ import sys
 sys.path.append('../CityLearn/')
 from citylearn.citylearn import CityLearnEnv
 
-building_count = 7
+building_count = 5
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state',
                                        'reward'))
 
@@ -25,7 +25,7 @@ wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_test")
-    wandb.run.name = "TRPO_ph3"
+    wandb.run.name = "TRPO_ph1"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -55,7 +55,7 @@ parser.add_argument('--render', action='store_true',
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_challenge_2022_phase_3/schema.json'
+schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_challenge_2022_phase_1/schema.json'
 # args.env_name = env_name
 
 # env = gym.make(args.env_name)

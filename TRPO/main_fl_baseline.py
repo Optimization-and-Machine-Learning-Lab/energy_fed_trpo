@@ -24,7 +24,7 @@ wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_test")
-    wandb.run.name = "TRPO_ph2_baseline"
+    wandb.run.name = "TRPO_ph1_baseline"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -54,7 +54,7 @@ parser.add_argument('--render', action='store_true',
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_challenge_2022_phase_2/schema.json'
+schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_challenge_2022_phase_1/schema.json'
 # args.env_name = env_name
 
 # env = gym.make(args.env_name)
@@ -68,6 +68,7 @@ num_actions = env.action_space[0].shape[0]
 # torch.manual_seed(args.seed)
 
 policy_nets = [Policy(num_inputs, num_actions) for i in range(building_count)]
+# print(num_inputs)
 value_nets = [Value(num_inputs) for i in range(building_count)]
 
 def select_action(state, policy_net):
@@ -161,6 +162,7 @@ for i_episode in count(1):
     num_episodes = 0
     while num_steps < args.batch_size:
         state = env.reset()
+        # print(len(state[0][:-building_count]))
         state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
 
         reward_sum = np.array([0.] * building_count)
@@ -202,5 +204,5 @@ for i_episode in count(1):
                 i_episode, reward_sum[b], reward_batch[b]))
             if wandb_record:
                 wandb.log({"eval_"+str(b+1): reward_sum[b]}, step = int(wandb_step))
-    if i_episode > 10000:
+    if i_episode > 100:
         break
