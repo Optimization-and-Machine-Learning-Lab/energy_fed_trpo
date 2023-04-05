@@ -2,7 +2,7 @@
   "root_directory": null,
   "central_agent": false,
   "simulation_start_time_step": 0,
-  "simulation_end_time_step": 4391,
+  "simulation_end_time_step": 23,
   "episodes": 1,
   "seconds_per_time_step": 3600,
   "observations": {
@@ -186,13 +186,13 @@
     "attributes": null
   },
   "buildings": {
-    "Building_6": {
+    "Building_1": {
       "include": true,
-      "energy_simulation": "Building_6.csv",
+      "energy_simulation": "Building_1.csv",
       "weather": "weather.csv",
       "carbon_intensity": "carbon_intensity.csv",
       "pricing": "pricing.csv",
-      "inactive_observations": [],
+      "inactive_observations": ["outdoor_dry_bulb_temperature", "outdoor_dry_bulb_temperature_predicted_6h", "outdoor_dry_bulb_temperature_predicted_12h", "outdoor_dry_bulb_temperature_predicted_24h", "outdoor_relative_humidity", "outdoor_relative_humidity_predicted_6h", "outdoor_relative_humidity_predicted_12h", "outdoor_relative_humidity_predicted_24h", "diffuse_solar_irradiance", "diffuse_solar_irradiance_predicted_6h", "diffuse_solar_irradiance_predicted_12h", "diffuse_solar_irradiance_predicted_24h", "direct_solar_irradiance", "direct_solar_irradiance_predicted_6h", "direct_solar_irradiance_predicted_12h", "direct_solar_irradiance_predicted_24h", "carbon_intensity", "non_shiftable_load", "solar_generation", "electrical_storage_soc", "net_electricity_consumption", "electricity_pricing", "electricity_pricing_predicted_6h", "electricity_pricing_predicted_12h", "electricity_pricing_predicted_24h"],
       "inactive_actions": [],
       "electrical_storage": {
         "type": "citylearn.energy_model.Battery",
@@ -213,13 +213,13 @@
         }
       }
     },
-    "Building_7": {
+    "Building_2": {
       "include": true,
-      "energy_simulation": "Building_7.csv",
+      "energy_simulation": "Building_2.csv",
       "weather": "weather.csv",
       "carbon_intensity": "carbon_intensity.csv",
       "pricing": "pricing.csv",
-      "inactive_observations": [],
+      "inactive_observations": ["month", "day_type", "hour", "outdoor_relative_humidity", "outdoor_relative_humidity_predicted_6h", "outdoor_relative_humidity_predicted_12h", "outdoor_relative_humidity_predicted_24h", "diffuse_solar_irradiance", "diffuse_solar_irradiance_predicted_6h", "diffuse_solar_irradiance_predicted_12h", "diffuse_solar_irradiance_predicted_24h", "direct_solar_irradiance", "direct_solar_irradiance_predicted_6h", "direct_solar_irradiance_predicted_12h", "direct_solar_irradiance_predicted_24h", "carbon_intensity", "non_shiftable_load", "solar_generation", "electrical_storage_soc", "net_electricity_consumption"],
       "inactive_actions": [],
       "electrical_storage": {
         "type": "citylearn.energy_model.Battery",
@@ -240,13 +240,13 @@
         }
       }
     },
-    "Building_8": {
+    "Building_3": {
       "include": true,
-      "energy_simulation": "Building_8.csv",
+      "energy_simulation": "Building_3.csv",
       "weather": "weather.csv",
       "carbon_intensity": "carbon_intensity.csv",
       "pricing": "pricing.csv",
-      "inactive_observations": [],
+      "inactive_observations": ["month", "day_type", "hour", "outdoor_dry_bulb_temperature", "outdoor_dry_bulb_temperature_predicted_6h", "outdoor_dry_bulb_temperature_predicted_12h", "outdoor_dry_bulb_temperature_predicted_24h", "diffuse_solar_irradiance", "diffuse_solar_irradiance_predicted_6h", "diffuse_solar_irradiance_predicted_12h", "diffuse_solar_irradiance_predicted_24h", "direct_solar_irradiance", "direct_solar_irradiance_predicted_6h", "direct_solar_irradiance_predicted_12h", "direct_solar_irradiance_predicted_24h", "carbon_intensity", "non_shiftable_load", "solar_generation", "electrical_storage_soc", "net_electricity_consumption", "electricity_pricing", "electricity_pricing_predicted_6h", "electricity_pricing_predicted_12h", "electricity_pricing_predicted_24h"],
       "inactive_actions": [],
       "electrical_storage": {
         "type": "citylearn.energy_model.Battery",
@@ -267,13 +267,40 @@
         }
       }
     },
-    "Building_9": {
+    "Building_4": {
       "include": true,
-      "energy_simulation": "Building_9.csv",
+      "energy_simulation": "Building_4.csv",
       "weather": "weather.csv",
       "carbon_intensity": "carbon_intensity.csv",
       "pricing": "pricing.csv",
-      "inactive_observations": [],
+      "inactive_observations": ["month", "day_type", "hour", "outdoor_dry_bulb_temperature", "outdoor_dry_bulb_temperature_predicted_6h", "outdoor_dry_bulb_temperature_predicted_12h", "outdoor_dry_bulb_temperature_predicted_24h", "outdoor_relative_humidity", "outdoor_relative_humidity_predicted_6h", "outdoor_relative_humidity_predicted_12h", "outdoor_relative_humidity_predicted_24h", "carbon_intensity", "non_shiftable_load", "solar_generation", "electrical_storage_soc", "net_electricity_consumption", "electricity_pricing", "electricity_pricing_predicted_6h", "electricity_pricing_predicted_12h", "electricity_pricing_predicted_24h"],
+      "inactive_actions": [],
+      "electrical_storage": {
+        "type": "citylearn.energy_model.Battery",
+        "autosize": false,
+        "attributes": {
+          "capacity": 6.4,
+          "efficiency": 0.9,
+          "capacity_loss_coefficient": 1e-05,
+          "loss_coefficient": 0.0,
+          "nominal_power": 5.0
+        }
+      },
+      "pv": {
+        "type": "citylearn.energy_model.PV",
+        "autosize": false,
+        "attributes": {
+          "nominal_power": 5.0
+        }
+      }
+    },
+    "Building_5": {
+      "include": true,
+      "energy_simulation": "Building_5.csv",
+      "weather": "weather.csv",
+      "carbon_intensity": "carbon_intensity.csv",
+      "pricing": "pricing.csv",
+      "inactive_observations": ["month", "day_type", "hour", "outdoor_dry_bulb_temperature", "outdoor_dry_bulb_temperature_predicted_6h", "outdoor_dry_bulb_temperature_predicted_12h", "outdoor_dry_bulb_temperature_predicted_24h", "outdoor_relative_humidity", "outdoor_relative_humidity_predicted_6h", "outdoor_relative_humidity_predicted_12h", "outdoor_relative_humidity_predicted_24h", "diffuse_solar_irradiance", "diffuse_solar_irradiance_predicted_6h", "diffuse_solar_irradiance_predicted_12h", "diffuse_solar_irradiance_predicted_24h", "direct_solar_irradiance", "direct_solar_irradiance_predicted_6h", "direct_solar_irradiance_predicted_12h", "direct_solar_irradiance_predicted_24h", "electricity_pricing", "electricity_pricing_predicted_6h", "electricity_pricing_predicted_12h", "electricity_pricing_predicted_24h"],
       "inactive_actions": [],
       "electrical_storage": {
         "type": "citylearn.energy_model.Battery",
@@ -291,33 +318,6 @@
         "autosize": false,
         "attributes": {
           "nominal_power": 4.0
-        }
-      }
-    },
-    "Building_10": {
-      "include": true,
-      "energy_simulation": "Building_10.csv",
-      "weather": "weather.csv",
-      "carbon_intensity": "carbon_intensity.csv",
-      "pricing": "pricing.csv",
-      "inactive_observations": [],
-      "inactive_actions": [],
-      "electrical_storage": {
-        "type": "citylearn.energy_model.Battery",
-        "autosize": false,
-        "attributes": {
-          "capacity": 6.4,
-          "efficiency": 0.9,
-          "capacity_loss_coefficient": 1e-05,
-          "loss_coefficient": 0.0,
-          "nominal_power": 5.0
-        }
-      },
-      "pv": {
-        "type": "citylearn.energy_model.PV",
-        "autosize": false,
-        "attributes": {
-          "nominal_power": 5.0
         }
       }
     }

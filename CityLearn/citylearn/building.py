@@ -69,6 +69,7 @@ class Building(Environment):
         self.observation_metadata = observation_metadata
         self.action_metadata = action_metadata
         self.__observation_epsilon = 0.0 # to avoid out of bound observations
+        self.observations_names = ["month", "day_type", "hour", "outdoor_dry_bulb_temperature", "outdoor_dry_bulb_temperature_predicted_6h", "outdoor_dry_bulb_temperature_predicted_12h", "outdoor_dry_bulb_temperature_predicted_24h", "outdoor_relative_humidity", "outdoor_relative_humidity_predicted_6h", "outdoor_relative_humidity_predicted_12h", "outdoor_relative_humidity_predicted_24h", "diffuse_solar_irradiance", "diffuse_solar_irradiance_predicted_6h", "diffuse_solar_irradiance_predicted_12h", "diffuse_solar_irradiance_predicted_24h", "direct_solar_irradiance", "direct_solar_irradiance_predicted_6h", "direct_solar_irradiance_predicted_12h", "direct_solar_irradiance_predicted_24h", "carbon_intensity", "non_shiftable_load", "solar_generation", "electrical_storage_soc", "net_electricity_consumption", "electricity_pricing", "electricity_pricing_predicted_6h", "electricity_pricing_predicted_12h", "electricity_pricing_predicted_24h"]
         self.observation_space = self.estimate_observation_space()
         self.action_space = self.estimate_action_space()
         super().__init__(**kwargs)
@@ -194,7 +195,8 @@ class Building(Environment):
             'net_electricity_consumption': self.__net_electricity_consumption[self.time_step],
             **{k: v[self.time_step] for k, v in vars(self.carbon_intensity).items()},
         }
-        observations = {k: data[k] for k in self.active_observations if k in data.keys()}
+
+        observations = {k: data[k] if k in data.keys() and k in self.active_observations else 0. for k in self.observations_names}
         unknown_observations = list(set([k for k in self.active_observations]).difference(observations.keys()))
         assert len(unknown_observations) == 0, f'Unkown observations: {unknown_observations}'
         return observations
@@ -655,7 +657,8 @@ class Building(Environment):
             **vars(self.pricing),
         }
 
-        for key in self.active_observations:
+        # for key in self.active_observations:
+        for key in self.observations_names:
             if key == 'net_electricity_consumption':
                 net_electric_consumption = self.energy_simulation.non_shiftable_load\
                     + (self.energy_simulation.dhw_demand)\
