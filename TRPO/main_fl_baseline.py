@@ -24,7 +24,7 @@ wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_test")
-    wandb.run.name = "TRPO_ph1_train-1_eval-rest_another_day"
+    wandb.run.name = "TRPO_my_env2_baseline"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -54,7 +54,9 @@ parser.add_argument('--render', action='store_true',
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_challenge_2022_phase_1/schema.json'
+schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
+eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
+
 # args.env_name = env_name
 
 # env = gym.make(args.env_name)
@@ -155,27 +157,26 @@ running_state = [ZFilter((num_inputs,), clip=5) for _ in range(building_count)]
 running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
 
 def evaluation():
-    eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_challenge_2022_phase_1/schema_eval.json'
     eval_env = CityLearnEnv(eval_schema_filepath)
     eval_reward = np.array([0.] * building_count)
 
     done = False
     state = eval_env.reset()
-    state = [running_state[i](state[i]) for i in range(building_count)]
+    state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
 
     while not done:
         action = [select_action(state[b], policy_nets[0]).data[0].numpy() for b in range(building_count)]
         next_state, reward, done, _ = eval_env.step(action)
         eval_reward += reward
 
-        next_state = [running_state[i](next_state[i]) for i in range(building_count)]
+        next_state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
 
     for b in range(building_count):
         print('evaluate reward {:.2f}'.format(eval_reward[b]))
 
     if wandb_record:
         for b in range(building_count):
-            wandb.log({"eval_"+str(b+1): eval_reward[b]}, step = int(wandb_step))
+            wandb.log({"eval_"+str(b+1): eval_reward[b]/24}, step = int(wandb_step))
 
 for i_episode in count(1):
     memories = [Memory() for _ in range(building_count)]
@@ -185,9 +186,8 @@ for i_episode in count(1):
     num_episodes = 0
     while num_steps < args.batch_size:
         state = env.reset()
-        # print(len(state[0][:-building_count]))
-        # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
-        state = [running_state[i](state[i]) for i in range(building_count)]
+        state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
+        # state = [running_state[i](state[i]) for i in range(building_count)]
 
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
@@ -197,8 +197,8 @@ for i_episode in count(1):
             # wandb_step += 1
             reward_sum += reward
 
-            # next_state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
-            next_state = [running_state[i](next_state[i]) for i in range(building_count)]
+            next_state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
+            # next_state = [running_state[i](next_state[i]) for i in range(building_count)]
 
             mask = 1
             if done:
@@ -228,9 +228,9 @@ for i_episode in count(1):
             print('Episode {}\tLast reward: {}\tAverage reward {:.2f}'.format(
                 i_episode, reward_sum[b], reward_batch[b]))
             if wandb_record:
-                wandb.log({"train_"+str(b+1): reward_sum[b]}, step = int(wandb_step))
+                wandb.log({"train_"+str(b+1): reward_sum[b]/24}, step = int(wandb_step))
         
     evaluation()
 
-    if i_episode > 100:
+    if i_episode > 500:
         break
