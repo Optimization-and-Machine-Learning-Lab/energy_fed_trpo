@@ -25,7 +25,7 @@ wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_test")
-    wandb.run.name = "TRPO_my_env2"
+    wandb.run.name = "TRPO_my_env2_cap1"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -56,7 +56,7 @@ parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
 schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
-eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
+eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
 
 # args.env_name = env_name
 
@@ -88,6 +88,11 @@ def select_action(state, model):
     action_mean, _, action_std = model(Variable(state))
     action = torch.normal(action_mean, action_std)
     return action
+
+def select_action_eval(state, policy_net):
+    state = torch.from_numpy(state).unsqueeze(0)
+    action_mean, _, _ = policy_net(Variable(state))
+    return action_mean
 
 def update_params(batch, policy_net, value_net):
     rewards = torch.Tensor(batch.reward)
@@ -175,11 +180,12 @@ def evaluation():
     state = [running_state[i](state[i]) for i in range(building_count)]
 
     while not done:
-        action = [select_action(state[b], policy_net).data[0].numpy() for b in range(building_count)]
+        action = [select_action_eval(state[b], policy_net).data[0].numpy() for b in range(building_count)]
+        print("{:.2f}".format(action[0][0].item()), end=", ")
         next_state, reward, done, _ = eval_env.step(action)
         eval_reward += reward
 
-        next_state = [running_state[i](next_state[i]) for i in range(building_count)]
+        state = [running_state[i](next_state[i]) for i in range(building_count)]
 
     for b in range(building_count):
         print('evaluate reward {:.2f}'.format(eval_reward[b]))

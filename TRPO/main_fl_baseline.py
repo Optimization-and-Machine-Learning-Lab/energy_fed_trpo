@@ -24,8 +24,9 @@ wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_test")
-    wandb.run.name = "TRPO_my_env2_baseline"
+    wandb.run.name = "TRPO_baseline"
 wandb_step = 0
+selection_action_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
 torch.utils.backcompat.keepdim_warning.enabled = True
@@ -69,15 +70,24 @@ num_actions = env.action_space[0].shape[0]
 # env.seed(args.seed)
 # torch.manual_seed(args.seed)
 
-policy_nets = [Policy(num_inputs, num_actions) for i in range(building_count)]
+policy_nets = [Policy(num_inputs, num_actions) for _ in range(building_count)]
 # print(num_inputs)
-value_nets = [Value(num_inputs) for i in range(building_count)]
+value_nets = [Value(num_inputs) for _ in range(building_count)]
 
 def select_action(state, policy_net):
     state = torch.from_numpy(state).unsqueeze(0)
     action_mean, _, action_std = policy_net(Variable(state))
+    global selection_action_step
+    if wandb_record:
+        wandb.log({"std": action_std}, step = int(selection_action_step))
+    selection_action_step += 1
     action = torch.normal(action_mean, action_std)
     return action
+
+def select_action_eval(state, policy_net):
+    state = torch.from_numpy(state).unsqueeze(0)
+    action_mean, _, _ = policy_net(Variable(state))
+    return action_mean
 
 def update_params(batch, policy_net, value_net):
     rewards = torch.Tensor(batch.reward)
@@ -165,14 +175,16 @@ def evaluation():
     state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
 
     while not done:
-        action = [select_action(state[b], policy_nets[0]).data[0].numpy() for b in range(building_count)]
+        action = [select_action_eval(state[b], policy_nets[0]).data[0].numpy() for b in range(building_count)]
+        print("{:.2f}".format(action[0].item()), end=", ")
         next_state, reward, done, _ = eval_env.step(action)
         eval_reward += reward
 
-        next_state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
+        state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
+    print()
 
     for b in range(building_count):
-        print('evaluate reward {:.2f}'.format(eval_reward[b]))
+        print('evaluate reward {:.2f}'.format(eval_reward[b]/24))
 
     if wandb_record:
         for b in range(building_count):
@@ -226,7 +238,7 @@ for i_episode in count(1):
 
         if i_episode % args.log_interval == 0:
             print('Episode {}\tLast reward: {}\tAverage reward {:.2f}'.format(
-                i_episode, reward_sum[b], reward_batch[b]))
+                i_episode, reward_sum[b]/24, reward_batch[b]/24))
             if wandb_record:
                 wandb.log({"train_"+str(b+1): reward_sum[b]/24}, step = int(wandb_step))
         

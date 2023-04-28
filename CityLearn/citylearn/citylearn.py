@@ -152,7 +152,7 @@ class CityLearnEnv(Environment, Env):
 
         return [[
             v for i, b in enumerate(self.buildings) for k, v in b.observations.items() if i == 0 or k not in self.shared_observations
-        # ]] if self.central_agent else [list(b.observations.values()) for b in self.buildings]
+        # ]] if self.central_agent else [list(b.observations.values()) for b in self.buildings]   # original one
         ]] if self.central_agent else [list(self.buildings[b].observations.values()) + [1 if b==j else 0 for j in range(len(self.buildings))] for b in range(len(self.buildings))]
 
 

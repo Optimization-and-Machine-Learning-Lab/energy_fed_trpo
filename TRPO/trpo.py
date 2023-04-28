@@ -32,7 +32,7 @@ def linesearch(model,
                max_backtracks=10,
                accept_ratio=.1):
     fval = f(True).data
-    print("fval before", fval.item())
+    # print("fval before", fval.item())
     for (_n_backtracks, stepfrac) in enumerate(.5**np.arange(max_backtracks)):
         xnew = x + stepfrac * fullstep
         set_flat_params_to(model, xnew)
@@ -40,10 +40,10 @@ def linesearch(model,
         actual_improve = fval - newfval
         expected_improve = expected_improve_rate * stepfrac
         ratio = actual_improve / expected_improve
-        print("a/e/r", actual_improve.item(), expected_improve.item(), ratio.item())
+        # print("a/e/r", actual_improve.item(), expected_improve.item(), ratio.item())
 
         if ratio.item() > accept_ratio and actual_improve.item() > 0:
-            print("fval after", newfval.item())
+            # print("fval after", newfval.item())
             return True, xnew
     return False, x
 
@@ -74,7 +74,7 @@ def trpo_step(model, get_loss, get_kl, max_kl, damping):
     fullstep = stepdir / lm[0]
 
     neggdotstepdir = (-loss_grad * stepdir).sum(0, keepdim=True)
-    print(("lagrange multiplier:", lm[0], "grad_norm:", loss_grad.norm()))
+    # print(("lagrange multiplier:", lm[0], "grad_norm:", loss_grad.norm()))
 
     prev_params = get_flat_params_from(model)
     success, new_params = linesearch(model, get_loss, prev_params, fullstep,
