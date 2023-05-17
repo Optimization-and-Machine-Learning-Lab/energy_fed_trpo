@@ -86,9 +86,9 @@ class EnergySimulation:
         self.average_unmet_cooling_setpoint_difference = np.array(average_unmet_cooling_setpoint_difference, dtype = float)
         self.indoor_relative_humidity = np.array(indoor_relative_humidity, dtype = float)
         self.non_shiftable_load = np.array(non_shiftable_load, dtype = float)
-        self.dhw_demand = np.array(dhw_demand, dtype = float)
-        self.cooling_demand = np.array(cooling_demand, dtype = float)
-        self.heating_demand = np.array(heating_demand, dtype = float)
+        # self.dhw_demand = np.array(dhw_demand, dtype = float)
+        # self.cooling_demand = np.array(cooling_demand, dtype = float)
+        # self.heating_demand = np.array(heating_demand, dtype = float)
         self.solar_generation = np.array(solar_generation, dtype = float)
 
 class Weather:
