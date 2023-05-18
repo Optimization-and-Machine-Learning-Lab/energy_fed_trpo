@@ -29,4 +29,4 @@ class Battery():
     def charge(self, energy: float):
         soc = min(self.soc[-1] + energy*self.efficiency, self.capacity) if energy >= 0 else max(0, self.soc[-1] + energy/self.efficiency)
         self.soc.append(soc)
-        self.electricity_consumption.append(self.soc[-1]-self.soc[-2])
+        self.electricity_consumption.append(self.soc[-1] - self.soc[-2])

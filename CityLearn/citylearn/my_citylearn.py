@@ -21,6 +21,9 @@ class CityLearnEnv(Env):
         super().__init__(**kwargs)
         self.time_step = 0
 
+        self.observation_space = [b.observation_space for b in self.buildings]
+        self.action_space = [b.action_space for b in self.buildings]
+
     @property
     def observations(self) -> List[List[float]]:
         """Observations at current time step.

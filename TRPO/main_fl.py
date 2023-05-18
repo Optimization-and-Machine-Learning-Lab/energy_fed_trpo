@@ -1,3 +1,5 @@
+import json
+import random
 import argparse
 from itertools import count
 from collections import namedtuple
@@ -14,18 +16,16 @@ from utils import *
 
 import sys
 sys.path.append('../CityLearn/')
-from citylearn.citylearn import CityLearnEnv
+from citylearn.my_citylearn import CityLearnEnv
 
 building_count = 5
-Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state',
-                                       'reward'))
+Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
-# env_name = "Humanoid-v4"
 wandb_record = True
 if wandb_record:
     import wandb
-    wandb.init(project="TRPO_rl_test")
-    wandb.run.name = "TRPO_my_env2_cap1"
+    wandb.init(project="TRPO_rl")
+    wandb.run.name = "FL_train_120-330_test_30_func"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -56,16 +56,17 @@ parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
 schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
-eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
+eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
 
-# args.env_name = env_name
 
-# env = gym.make(args.env_name)
 env = CityLearnEnv(schema_filepath)
+buildings = env.buildings
+encoders = np.array([buildings[i].observation_encoders for i in range(5)])
 
-num_inputs = env.observation_space[0].shape[0] + building_count
+num_inputs = env.observation_space[0].shape[0] + building_count + 2
 num_actions = env.action_space[0].shape[0]
 # print("num_inputs", num_inputs)
+# random.seed(args.seed)
 # env.seed(args.seed)
 # torch.manual_seed(args.seed)
 
@@ -168,8 +169,8 @@ def update_params(batch, policy_net, value_net):
 
     trpo_step(policy_net, get_loss, get_kl, args.max_kl, args.damping)
 
-running_state = [ZFilter((num_inputs,), clip=5) for _ in range(building_count)]
-running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
+# running_state = [ZFilter((num_inputs,), clip=5) for _ in range(building_count)]
+# running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
 
 def evaluation():
     eval_env = CityLearnEnv(eval_schema_filepath)
@@ -177,22 +178,27 @@ def evaluation():
 
     done = False
     state = eval_env.reset()
-    state = [running_state[i](state[i]) for i in range(building_count)]
+    # state = [running_state[i](state[i]) for i in range(building_count)]
+    state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
 
     while not done:
-        action = [select_action_eval(state[b], policy_net).data[0].numpy() for b in range(building_count)]
-        print("{:.2f}".format(action[0][0].item()), end=", ")
+        action = [select_action_eval(state[b], policy_net).item() for b in range(building_count)]
+        print("{:.2f}".format(action[0]), end=", ")
         next_state, reward, done, _ = eval_env.step(action)
         eval_reward += reward
 
-        state = [running_state[i](next_state[i]) for i in range(building_count)]
+        # state = [running_state[i](next_state[i]) for i in range(building_count)]
+        state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
 
     for b in range(building_count):
-        print('evaluate reward {:.2f}'.format(eval_reward[b]))
+        print('evaluate reward {:.2f}'.format(eval_reward[b]/24))
 
     if wandb_record:
         for b in range(building_count):
             wandb.log({"eval_"+str(b+1): eval_reward[b]/24}, step = int(wandb_step))
+
+with open(schema_filepath) as json_file:
+    schema_dict = json.load(json_file)
 
 for i_episode in count(1):
     memories = [Memory() for _ in range(building_count)]
@@ -204,20 +210,26 @@ for i_episode in count(1):
     num_steps = 0
 
     while num_steps < args.batch_size:  # 15000
+        date = random.randint(120, 330)#(183, 364)
+        schema_dict["simulation_start_time_step"] = date * 24
+        schema_dict["simulation_end_time_step"] = date * 24 + 23
+        # print("simulation_start_time_step", schema_dict["simulation_start_time_step"])
+        env = CityLearnEnv(schema_dict)
+
         state = env.reset()     # list of lists
         # for s in state:
         #     print(len(s))
-        state = [running_state[i](state[i]) for i in range(building_count)]
+        # state = [running_state[i](state[i]) for i in range(building_count)]
+        state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
 
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
-            action = [select_action(state[b], policy_net).data[0].numpy() for b in range(building_count)]
+            action = [select_action(state[b], policy_net).item() for b in range(building_count)]
             next_state, reward, done, _ = env.step(action)
-            # wandb_step += 1
             reward_sum += reward
 
-            next_state = [running_state[i](next_state[i]) for i in range(building_count)]
-            # next_state = running_state(next_state)
+            # next_state = [running_state[i](next_state[i]) for i in range(building_count)]
+            next_state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
 
             mask = 1
             if done:
@@ -242,7 +254,7 @@ for i_episode in count(1):
         batch += memories[b].sample()
         if i_episode % args.log_interval == 0:
             print('Episode {}\tLast reward: {}\tAverage reward {:.2f}'.format(
-                i_episode, reward_sum[b], reward_batch[b]))
+                i_episode, reward_sum[b]/24, reward_batch[b]/24))
             if wandb_record:
                 wandb.log({"train_"+str(b+1): reward_sum[b]/24}, step = int(wandb_step))
 
@@ -251,5 +263,5 @@ for i_episode in count(1):
 
     evaluation()
 
-    if i_episode > 500:
+    if i_episode > 1500:
         break

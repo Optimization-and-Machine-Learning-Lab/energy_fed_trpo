@@ -118,7 +118,7 @@ class Building():
         return spaces.Box(low=np.array(low_limit, dtype='float32'), high=np.array(high_limit, dtype='float32'))
 
     def estimate_action_space(self) -> spaces.Box:
-        return spaces.Box(low=np.array(-1.0, dtype='float32'), high=np.array(1.0, dtype='float32'))
+        return spaces.Box(low=np.array([-1.0], dtype='float32'), high=np.array([1.0], dtype='float32'))
 
     @property
     def observations(self) -> Mapping[str, float]:

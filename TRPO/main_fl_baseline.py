@@ -1,4 +1,6 @@
 # run simple TRPO on all five buildings, plot a baseline
+import json
+import random
 import argparse
 from itertools import count
 
@@ -15,16 +17,15 @@ from utils import *
 
 import sys
 sys.path.append('../CityLearn/')
-from citylearn.citylearn import CityLearnEnv
+from citylearn.my_citylearn import CityLearnEnv
 
 building_count = 5
 
-# env_name = "Humanoid-v4"
 wandb_record = True
 if wandb_record:
     import wandb
-    wandb.init(project="TRPO_rl_test")
-    wandb.run.name = "TRPO_baseline"
+    wandb.init(project="TRPO_rl")
+    wandb.run.name = "baseline_train_120-330_test_30_func"
 wandb_step = 0
 selection_action_step = 0
 
@@ -58,29 +59,14 @@ args = parser.parse_args()
 schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
 eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
 
-# args.env_name = env_name
-
-# env = gym.make(args.env_name)
-env = CityLearnEnv(schema_filepath)
-
-# print(env.observation_space)
-num_inputs = env.observation_space[0].shape[0]
-num_actions = env.action_space[0].shape[0]
-
-# env.seed(args.seed)
-# torch.manual_seed(args.seed)
-
-policy_nets = [Policy(num_inputs, num_actions) for _ in range(building_count)]
-# print(num_inputs)
-value_nets = [Value(num_inputs) for _ in range(building_count)]
 
 def select_action(state, policy_net):
     state = torch.from_numpy(state).unsqueeze(0)
     action_mean, _, action_std = policy_net(Variable(state))
-    global selection_action_step
-    if wandb_record:
-        wandb.log({"std": action_std}, step = int(selection_action_step))
-    selection_action_step += 1
+    # global selection_action_step
+    # if wandb_record:
+    #     wandb.log({"std": action_std}, step = int(selection_action_step))
+    # selection_action_step += 1
     action = torch.normal(action_mean, action_std)
     return action
 
@@ -163,86 +149,117 @@ def update_params(batch, policy_net, value_net):
 
     trpo_step(policy_net, get_loss, get_kl, args.max_kl, args.damping)
 
-running_state = [ZFilter((num_inputs,), clip=5) for _ in range(building_count)]
-running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
+# running_state = [ZFilter((num_inputs,), clip=5) for _ in range(building_count)]
+# running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
 
-def evaluation():
-    eval_env = CityLearnEnv(eval_schema_filepath)
-    eval_reward = np.array([0.] * building_count)
+def evaluation(schema_dict_eval, encoder, b):
+    eval_env = CityLearnEnv(schema_dict_eval)
+    eval_reward = 0.
 
     done = False
     state = eval_env.reset()
-    state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
+    # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
+    state = np.hstack(encoder*state[0])
 
     while not done:
-        action = [select_action_eval(state[b], policy_nets[0]).data[0].numpy() for b in range(building_count)]
-        print("{:.2f}".format(action[0].item()), end=", ")
+        action = select_action_eval(state, policy_net).data[0].numpy()
+        print("{:.2f}".format(action.item()), end=", ")
         next_state, reward, done, _ = eval_env.step(action)
-        eval_reward += reward
+        eval_reward += reward[0]
 
-        state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
+        # state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
+        state = np.hstack(encoder*next_state[0])
     print()
 
-    for b in range(building_count):
-        print('evaluate reward {:.2f}'.format(eval_reward[b]/24))
+    print('evaluate reward {:.2f}'.format(eval_reward/24))
 
     if wandb_record:
-        for b in range(building_count):
-            wandb.log({"eval_"+str(b+1): eval_reward[b]/24}, step = int(wandb_step))
+        wandb.log({"eval_"+str(b+1): eval_reward/24}, step = int(wandb_step))
 
-for i_episode in count(1):
-    memories = [Memory() for _ in range(building_count)]
+for b in range(5):
+    with open(schema_filepath) as json_file:
+        schema_dict = json.load(json_file)
+    with open(eval_schema_filepath) as json_eval_file:
+        schema_dict_eval = json.load(json_eval_file)
 
-    num_steps = 0
-    reward_batch = np.array([0.] * building_count)
-    num_episodes = 0
-    while num_steps < args.batch_size:
-        state = env.reset()
-        state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
-        # state = [running_state[i](state[i]) for i in range(building_count)]
+    schema_dict["personalization"] = False
+    schema_dict_eval["personalization"] = False
 
-        reward_sum = np.array([0.] * building_count)
-        for t in range(10000): # Don't infinite loop while learning
-            action = [select_action(state[b], policy_nets[b]).data[0].numpy() for b in range(building_count)]
-            # action = action.data[0].numpy()
-            next_state, reward, done, _ = env.step(action)
-            # wandb_step += 1
-            reward_sum += reward
+    for b_i in range(5):
+        if b_i == b:
+            continue
+        schema_dict["buildings"]["Building_"+str(b_i+1)]["include"] = False
+        schema_dict_eval["buildings"]["Building_"+str(b_i+1)]["include"] = False
+    
+    env = CityLearnEnv(schema_filepath)
+    building = env.buildings[0]
+    encoder = np.array(building.observation_encoders)
 
-            next_state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
-            # next_state = [running_state[i](next_state[i]) for i in range(building_count)]
+    num_inputs = env.observation_space[0].shape[0] + 2
+    num_actions = env.action_space[0].shape[0]
 
-            mask = 1
-            if done:
-                mask = 0
+    # random.seed(args.seed)
+    # env.seed(args.seed)
+    # torch.manual_seed(args.seed)
 
-            for b in range(building_count):
-                memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b])
+    policy_net = Policy(num_inputs, num_actions)
+    # print(num_inputs)
+    value_net = Value(num_inputs)
 
-            if args.render:
-                env.render()
-            if done:
-                break
+    for i_episode in count(1):
+        memory = Memory()
 
-            state = next_state
-        num_steps += (t-1)
-        num_episodes += 1
-        reward_batch += reward_sum
+        num_steps = 0
+        reward_batch = 0
+        num_episodes = 0
+        while num_steps < args.batch_size:
+            # print("num_steps", num_steps)
+            date = random.randint(120, 330)#(183, 364)#
+            schema_dict["simulation_start_time_step"] = date * 24
+            schema_dict["simulation_end_time_step"] = date * 24 + 23
+            # print("simulation_start_time_step", schema_dict["simulation_start_time_step"])
+            env = CityLearnEnv(schema_dict)
 
-    wandb_step += 1     # count training step
-    batch = []
-    for b in range(building_count):
-        reward_batch[b] /= num_episodes
-        batch = memories[b].sample_batch()
-        update_params(batch, policy_nets[b], value_nets[b])
+            state = env.reset()
+            # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
+            state = np.hstack(encoder*state[0])
+
+            reward_sum = 0
+            for t in range(10000): # Don't infinite loop while learning
+                action = select_action(state, policy_net).data[0].numpy()
+                next_state, reward, done, _ = env.step(action)
+                reward_sum += reward[0]
+
+                next_state = np.hstack(encoder*state[0])
+                # next_state = [running_state[i](next_state[i]) for i in range(building_count)]
+
+                mask = 1
+                if done:
+                    mask = 0
+
+                memory.push(state, np.array(action), mask, next_state, reward[0])
+
+                if done:
+                    break
+
+                state = next_state
+            num_steps += (t-1)
+            num_episodes += 1
+            reward_batch += reward_sum
+
+        wandb_step += 1     # count training step
+        batch = []
+        reward_batch /= num_episodes
+        batch = memory.sample_batch()
+        update_params(batch, policy_net, value_net)
 
         if i_episode % args.log_interval == 0:
             print('Episode {}\tLast reward: {}\tAverage reward {:.2f}'.format(
-                i_episode, reward_sum[b]/24, reward_batch[b]/24))
+                i_episode, reward_sum/24, reward_batch/24))
             if wandb_record:
-                wandb.log({"train_"+str(b+1): reward_sum[b]/24}, step = int(wandb_step))
-        
-    evaluation()
+                wandb.log({"train_"+str(b+1): reward_sum/24}, step = int(wandb_step))
+            
+        evaluation(schema_dict_eval, encoder, b)
 
-    if i_episode > 500:
-        break
+        if i_episode > 1500:
+            break
