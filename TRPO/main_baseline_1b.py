@@ -10,6 +10,7 @@ import scipy.optimize
 import torch
 from models import *
 from replay_memory import Memory
+from running_state import ZFilter
 from torch.autograd import Variable
 from trpo import trpo_step
 from utils import *
@@ -55,7 +56,6 @@ parser.add_argument('--building-no', type=int, default=4,
 args = parser.parse_args()
 schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
 eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
-
 
 def select_action(state, policy_net):
     state = torch.from_numpy(state).unsqueeze(0)
@@ -146,14 +146,14 @@ def update_params(batch, policy_net, value_net):
 
     trpo_step(policy_net, get_loss, get_kl, args.max_kl, args.damping)
 
-def evaluation(schema_dict_eval, encoder, b):
+def evaluation(schema_dict_eval, running_state, b):
     eval_env = CityLearnEnv(schema_dict_eval)
     eval_reward = 0.
 
     done = False
     state = eval_env.reset()
-    # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
-    state = np.hstack(encoder*state[0])
+    state = running_state(state[0])
+    # state = np.hstack(encoder*state[0])
 
     while not done:
         action = select_action_eval(state, policy_net).data[0].numpy()
@@ -161,8 +161,8 @@ def evaluation(schema_dict_eval, encoder, b):
         next_state, reward, done, _ = eval_env.step(action)
         eval_reward += reward[0]
 
-        # state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
-        state = np.hstack(encoder*next_state[0])
+        state = running_state(next_state[0])
+        # state = np.hstack(encoder*next_state[0])
     print()
 
     print('evaluate reward {:.2f}'.format(eval_reward/24))
@@ -187,10 +187,13 @@ for b_i in range(5):
 
 env = CityLearnEnv(schema_filepath)
 building = env.buildings[0]
-encoder = np.array(building.observation_encoders)
+# encoder = np.array(building.observation_encoders)
 
-num_inputs = env.observation_space[0].shape[0] + 2
+num_inputs = env.observation_space[0].shape[0] #+ 2
 num_actions = env.action_space[0].shape[0]
+
+running_state = ZFilter((num_inputs,), clip=5)
+running_reward = ZFilter((1,), demean=False, clip=10)
 
 # random.seed(args.seed)
 # env.seed(args.seed)
@@ -211,9 +214,8 @@ for i_episode in count(1):
 
         state = env.reset()
         # print("initial state")
-        # print(state)
-        # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
-        state = np.hstack(encoder*state[0])
+        state = running_state(state[0])
+        # state = np.hstack(encoder*state[0])
 
         reward_sum = 0
         for t in range(10000): # Don't infinite loop while learning
@@ -225,8 +227,8 @@ for i_episode in count(1):
             # print(next_state)
             reward_sum += reward[0]
 
-            next_state = np.hstack(encoder*next_state[0])
-            # next_state = [running_state[i](next_state[i]) for i in range(building_count)]
+            # next_state = np.hstack(encoder*next_state[0])
+            next_state = running_state(next_state[0])
 
             mask = 1
             if done:
@@ -255,7 +257,7 @@ for i_episode in count(1):
         if wandb_record:
             wandb.log({"train_"+str(args.building_no+1): reward_sum/24}, step = int(wandb_step))
         
-    evaluation(schema_dict_eval, encoder, args.building_no)
+    evaluation(schema_dict_eval, running_state, args.building_no)
 
     if i_episode > 1500:
         break
