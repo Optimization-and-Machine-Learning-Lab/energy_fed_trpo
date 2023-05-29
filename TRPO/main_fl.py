@@ -18,14 +18,16 @@ import sys
 sys.path.append('../CityLearn/')
 from citylearn.my_citylearn import CityLearnEnv
 
+np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
+
 building_count = 5
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
-wandb_record = True
+wandb_record = False
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl")
-    wandb.run.name = "FL_train_120-330_test_30_func"
+    wandb.run.name = "FL_train_30-210_test_0_func"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -210,7 +212,7 @@ for i_episode in count(1):
     num_steps = 0
 
     while num_steps < args.batch_size:  # 15000
-        date = random.randint(120, 330)#(183, 364)
+        date = random.randint(2*30, 8*30)#(183, 364)
         schema_dict["simulation_start_time_step"] = date * 24
         schema_dict["simulation_end_time_step"] = date * 24 + 23
         # print("simulation_start_time_step", schema_dict["simulation_start_time_step"])
@@ -224,6 +226,7 @@ for i_episode in count(1):
 
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
+            print(state[0])
             action = [select_action(state[b], policy_net).item() for b in range(building_count)]
             next_state, reward, done, _ = env.step(action)
             reward_sum += reward
@@ -233,6 +236,7 @@ for i_episode in count(1):
 
             mask = 1
             if done:
+                exit()
                 mask = 0
 
             for b in range(building_count):

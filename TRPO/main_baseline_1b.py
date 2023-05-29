@@ -18,6 +18,8 @@ import sys
 sys.path.append('../CityLearn/')
 from citylearn.my_citylearn import CityLearnEnv
 
+np.set_printoptions(formatter={'float': lambda x: "{0:0.5f}".format(x)})
+
 wandb_record = True
 if wandb_record:
     import wandb
@@ -48,7 +50,7 @@ parser.add_argument('--batch-size', type=int, default=15000, metavar='N',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
-parser.add_argument('--building-no', type=int, default=1,
+parser.add_argument('--building-no', type=int, default=4,
                     help='trained building')
 args = parser.parse_args()
 schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
@@ -205,24 +207,25 @@ for i_episode in count(1):
     reward_batch = 0
     num_episodes = 0
     while num_steps < args.batch_size:
-        # print("num_steps", num_steps)
-        # date = random.randint(2*30, 8*30)#(183, 364)#
-        # schema_dict["simulation_start_time_step"] = date * 24
-        # schema_dict["simulation_end_time_step"] = date * 24 + 23
-        # print("simulation_start_time_step", schema_dict["simulation_start_time_step"])
         env = CityLearnEnv(schema_dict)
 
         state = env.reset()
+        # print("initial state")
+        # print(state)
         # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
         state = np.hstack(encoder*state[0])
 
         reward_sum = 0
         for t in range(10000): # Don't infinite loop while learning
+            # print(state)
+            # print()
             action = select_action(state, policy_net).data[0].numpy()
             next_state, reward, done, _ = env.step(action)
+            # print("initial state")
+            # print(next_state)
             reward_sum += reward[0]
 
-            next_state = np.hstack(encoder*state[0])
+            next_state = np.hstack(encoder*next_state[0])
             # next_state = [running_state[i](next_state[i]) for i in range(building_count)]
 
             mask = 1
@@ -232,6 +235,7 @@ for i_episode in count(1):
             memory.push(state, np.array(action), mask, next_state, reward[0])
 
             if done:
+                # exit()
                 break
 
             state = next_state

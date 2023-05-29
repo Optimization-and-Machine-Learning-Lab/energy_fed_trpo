@@ -25,7 +25,7 @@ wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl")
-    wandb.run.name = "baseline_train_60-240_test_0_func"
+    wandb.run.name = "baseline_train_0_test_0_func"
 wandb_step = 0
 selection_action_step = 0
 
@@ -56,7 +56,7 @@ parser.add_argument('--render', action='store_true',
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
+schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
 eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
 
 
@@ -215,9 +215,9 @@ for b in range(5):
         num_episodes = 0
         while num_steps < args.batch_size:
             # print("num_steps", num_steps)
-            date = random.randint(2*30, 8*30)#(183, 364)#
-            schema_dict["simulation_start_time_step"] = date * 24
-            schema_dict["simulation_end_time_step"] = date * 24 + 23
+            # date = random.randint(2*30, 8*30)#(183, 364)#
+            # schema_dict["simulation_start_time_step"] = date * 24
+            # schema_dict["simulation_end_time_step"] = date * 24 + 23
             # print("simulation_start_time_step", schema_dict["simulation_start_time_step"])
             env = CityLearnEnv(schema_dict)
 
@@ -262,5 +262,5 @@ for b in range(5):
             
         evaluation(schema_dict_eval, encoder, b)
 
-        if i_episode > 1500:
+        if i_episode > 500:
             break

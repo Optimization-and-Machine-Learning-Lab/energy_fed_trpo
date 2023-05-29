@@ -105,6 +105,10 @@ class Building():
                 low_limit.append(-max(abs(net_electric_consumption)))
                 high_limit.append(max(abs(net_electric_consumption)))
 
+            elif key == 'solar_generation':
+                low_limit.append(0.0)
+                high_limit.append(max(data[key]) * 1.0 / 1000)      # TODO: nominal_power, I am lazy
+
             elif key in ['electrical_storage_soc']:
                 low_limit.append(0.0)
                 high_limit.append(1.0)
@@ -209,6 +213,7 @@ class Building():
                 encoders.append(NoNormalization())
             
             else:
+                # print("encoder", observation, self.observation_space.low[i], self.observation_space.high[i])
                 encoders.append(Normalize(self.observation_space.low[i], self.observation_space.high[i]))
 
         return encoders
