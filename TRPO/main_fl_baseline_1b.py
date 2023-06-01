@@ -239,7 +239,7 @@ for i_episode in count(1):
         print('Episode {}\tLast reward: {}\tAverage reward {:.2f}'.format(
             i_episode, reward_sum/24, reward_batch/24))
         if wandb_record:
-            wandb.log({"train"+str(args.building_no+1): reward_sum/24}, step = int(wandb_step))
+            wandb.log({"train_"+str(args.building_no+1): reward_sum/24}, step = int(wandb_step))
     
     evaluation(schema_dict_eval)
         

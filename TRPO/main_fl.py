@@ -23,7 +23,7 @@ np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 building_count = 5
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
-wandb_record = False
+wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl")
@@ -62,10 +62,8 @@ eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/s
 
 
 env = CityLearnEnv(schema_filepath)
-buildings = env.buildings
-encoders = np.array([buildings[i].observation_encoders for i in range(5)])
 
-num_inputs = env.observation_space[0].shape[0] + building_count + 2
+num_inputs = env.observation_space[0].shape[0] + building_count
 num_actions = env.action_space[0].shape[0]
 # print("num_inputs", num_inputs)
 # random.seed(args.seed)
@@ -86,13 +84,13 @@ def syn_model(models):
         for name, params in m.named_parameters():
             params.data.copy_(mean_model[name])
 
-def select_action(state, model):
+def select_action(state):
     state = torch.from_numpy(state).unsqueeze(0)
-    action_mean, _, action_std = model(Variable(state))
+    action_mean, _, action_std = policy_net(Variable(state))
     action = torch.normal(action_mean, action_std)
     return action
 
-def select_action_eval(state, policy_net):
+def select_action_eval(state):
     state = torch.from_numpy(state).unsqueeze(0)
     action_mean, _, _ = policy_net(Variable(state))
     return action_mean
@@ -171,8 +169,8 @@ def update_params(batch, policy_net, value_net):
 
     trpo_step(policy_net, get_loss, get_kl, args.max_kl, args.damping)
 
-# running_state = [ZFilter((num_inputs,), clip=5) for _ in range(building_count)]
-# running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
+running_state = [ZFilter((num_inputs-building_count,), clip=5) for _ in range(building_count)]
+running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
 
 def evaluation():
     eval_env = CityLearnEnv(eval_schema_filepath)
@@ -180,17 +178,17 @@ def evaluation():
 
     done = False
     state = eval_env.reset()
-    # state = [running_state[i](state[i]) for i in range(building_count)]
-    state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
+    state = [np.concatenate((running_state[i](state[i][:-building_count]), state[i][-building_count:])) for i in range(building_count)]
+    # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
 
     while not done:
-        action = [select_action_eval(state[b], policy_net).item() for b in range(building_count)]
+        action = [select_action_eval(state[b]).item() for b in range(building_count)]
         print("{:.2f}".format(action[0]), end=", ")
         next_state, reward, done, _ = eval_env.step(action)
         eval_reward += reward
 
-        # state = [running_state[i](next_state[i]) for i in range(building_count)]
-        state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
+        state = [np.concatenate((running_state[i](next_state[i][:-building_count]), next_state[i][-building_count:])) for i in range(building_count)]
+        # state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
 
     for b in range(building_count):
         print('evaluate reward {:.2f}'.format(eval_reward[b]/24))
@@ -221,22 +219,20 @@ for i_episode in count(1):
         state = env.reset()     # list of lists
         # for s in state:
         #     print(len(s))
-        # state = [running_state[i](state[i]) for i in range(building_count)]
-        state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
+        state = [np.concatenate((running_state[i](state[i][:-building_count]), state[i][-building_count:])) for i in range(building_count)]
+        # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
 
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
-            print(state[0])
-            action = [select_action(state[b], policy_net).item() for b in range(building_count)]
+            action = [select_action(state[b]).item() for b in range(building_count)]
             next_state, reward, done, _ = env.step(action)
             reward_sum += reward
 
-            # next_state = [running_state[i](next_state[i]) for i in range(building_count)]
-            next_state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
+            next_state = [np.concatenate((running_state[i](next_state[i][:-building_count]), next_state[i][-building_count:])) for i in range(building_count)]
+            # next_state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
 
             mask = 1
             if done:
-                exit()
                 mask = 0
 
             for b in range(building_count):
