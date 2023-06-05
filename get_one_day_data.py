@@ -2,7 +2,7 @@ import numpy as np
 
 import sys
 sys.path.append('./CityLearn/')
-from citylearn.citylearn import CityLearnEnv
+from citylearn.my_citylearn import CityLearnEnv
 
 schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
 env = CityLearnEnv(schema_filepath)
@@ -22,7 +22,7 @@ while not done:
     states.append([s[-10] for s in state])
     # print(state[0][-9], end=", ")
     # print(state)
-    state, r, done, _ = env.step([[1.0]] * 5)
+    state, r, done, _ = env.step([1.0] * 5)
     # reward += r[0]
     # print(info)
     # print(state)

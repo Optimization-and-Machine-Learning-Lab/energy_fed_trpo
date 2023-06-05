@@ -60,13 +60,12 @@ class Building():
         self.weather = weather
         self.electrical_storage = Battery(0.0, 0.0)
         self.pv = PV(0.0)
+        self.pricing = pricing
         
         self.observation_metadata = observation_metadata
         self.action_metadata = action_metadata
         self.__observation_epsilon = 0.0 # to avoid out of bound observations
         self.active_observations = [k for k, v in self.observation_metadata.items() if v]
-        # TODO: remove useless ones??? use active_observations not observations_names
-        self.observations_names = ["month", "day_type", "hour", "outdoor_dry_bulb_temperature", "outdoor_dry_bulb_temperature_predicted_6h", "outdoor_dry_bulb_temperature_predicted_12h", "outdoor_dry_bulb_temperature_predicted_24h", "outdoor_relative_humidity", "outdoor_relative_humidity_predicted_6h", "outdoor_relative_humidity_predicted_12h", "outdoor_relative_humidity_predicted_24h", "diffuse_solar_irradiance", "diffuse_solar_irradiance_predicted_6h", "diffuse_solar_irradiance_predicted_12h", "diffuse_solar_irradiance_predicted_24h", "direct_solar_irradiance", "direct_solar_irradiance_predicted_6h", "direct_solar_irradiance_predicted_12h", "direct_solar_irradiance_predicted_24h", "carbon_intensity", "non_shiftable_load", "solar_generation", "electrical_storage_soc", "net_electricity_consumption", "electricity_pricing", "electricity_pricing_predicted_6h", "electricity_pricing_predicted_12h", "electricity_pricing_predicted_24h"]
         self.observation_space = self.estimate_observation_space()
         self.action_space = self.estimate_action_space()
         
@@ -93,6 +92,7 @@ class Building():
             'solar_generation':np.array(self.pv.get_generation(self.energy_simulation.solar_generation)),
             **vars(self.energy_simulation),
             **vars(self.weather),
+            **vars(self.pricing),
         }
 
         # for key in self.active_observations:
@@ -130,6 +130,7 @@ class Building():
 
         observations = {}
         data = {
+            **{k: v[self.time_step] for k, v in vars(self.pricing).items()},
             **{k: v[self.time_step] for k, v in vars(self.energy_simulation).items()},
             **{k: v[self.time_step] for k, v in vars(self.weather).items()},
             'solar_generation':self.pv.get_generation(self.energy_simulation.solar_generation[self.time_step]),
@@ -151,18 +152,21 @@ class Building():
         self.pv.reset()
         self.__solar_generation = self.pv.get_generation(self.energy_simulation.solar_generation)*-1    # solar generation value / 200
         self.__net_electricity_consumption = []
-        self.update_consumption()
+        self.__net_electricity_consumption_price = []
+        self.update_variables()
 
     def next_time_step(self):
         self.time_step += 1
-        self.update_consumption()
+        self.update_variables()
 
-    def update_consumption(self):
+    def update_variables(self):
         # net electricity consumption
         net_electricity_consumption = self.electrical_storage.electricity_consumption[self.time_step] \
                         + self.energy_simulation.non_shiftable_load[self.time_step] \
                             + self.__solar_generation[self.time_step]
         self.__net_electricity_consumption.append(net_electricity_consumption)
+
+        self.__net_electricity_consumption_price.append(net_electricity_consumption*self.pricing.electricity_pricing[self.time_step])
     
     def apply_actions(self, electrical_storage_action: float = 0):
         energy = electrical_storage_action*self.electrical_storage.capacity
@@ -172,7 +176,10 @@ class Building():
     def net_electricity_consumption(self):
         return self.__net_electricity_consumption
 
-    # TODO: no need for normalization
+    @property
+    def net_electricity_consumption_price(self) -> List[float]:
+        return self.__net_electricity_consumption_price
+
     @property
     def observation_encoders(self) -> List[Encoder]:
         r"""Get observation value transformers/encoders for use in agent algorithm.

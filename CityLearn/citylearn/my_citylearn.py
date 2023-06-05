@@ -8,7 +8,7 @@ import pandas as pd
 from citylearn.my_building import Building
 from citylearn.cost_function import CostFunction
 from citylearn.data import DataSet, EnergySimulation, CarbonIntensity, Pricing, Weather
-from citylearn.reward_function import RewardFunction
+from citylearn.my_reward_function import RewardFunction
 from citylearn.utilities import read_json
 from citylearn.rendering import get_background, RenderBuilding, get_plots
 
@@ -41,6 +41,7 @@ class CityLearnEnv(Env):
             return [list(b.observations.values()) for b in self.buildings]   # original one
 
     def reset(self):
+        self.time_step = 0
         for building in self.buildings:
             building.reset()
         # self.__net_electricity_consumption = []
@@ -69,6 +70,7 @@ class CityLearnEnv(Env):
         """
 
         self.reward_function.electricity_consumption = [b.net_electricity_consumption[self.time_step] for b in self.buildings]
+        self.reward_function.electricity_price = [b.net_electricity_consumption_price[self.time_step] for b in self.buildings]
         reward = self.reward_function.calculate()
         return reward
 
@@ -117,7 +119,12 @@ class CityLearnEnv(Env):
                 weather = Weather(*weather.values.T)
 
                 carbon_intensity = None
-                pricing = None
+
+                if building_schema.get('pricing', None) is not None:
+                    pricing = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['pricing'])).iloc[simulation_start_time_step:simulation_end_time_step + 1].copy()
+                    pricing = Pricing(*pricing.values.T)
+                else:
+                    pricing = None
                     
                 # observation and action metadata
                 inactive_observations = [] if building_schema.get('inactive_observations', None) is None else building_schema['inactive_observations']

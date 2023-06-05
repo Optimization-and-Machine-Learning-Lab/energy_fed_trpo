@@ -20,14 +20,14 @@ from citylearn.my_citylearn import CityLearnEnv
 
 np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 
-building_count = 5
+building_count = 1
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
 wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl")
-    wandb.run.name = "FL_train_30-210_test_0_func"
+    wandb.run.name = "FL_train_30-210_test_0_func_1b_test"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -172,8 +172,8 @@ def update_params(batch, policy_net, value_net):
 running_state = [ZFilter((num_inputs-building_count,), clip=5) for _ in range(building_count)]
 running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
 
-def evaluation():
-    eval_env = CityLearnEnv(eval_schema_filepath)
+def evaluation(schema_dict_eval):
+    eval_env = CityLearnEnv(schema_dict_eval)
     eval_reward = np.array([0.] * building_count)
 
     done = False
@@ -199,6 +199,18 @@ def evaluation():
 
 with open(schema_filepath) as json_file:
     schema_dict = json.load(json_file)
+with open(eval_schema_filepath) as json_eval_file:
+    schema_dict_eval = json.load(json_eval_file)
+
+# schema_dict["personalization"] = False
+# schema_dict_eval["personalization"] = False
+
+for b_i in range(5):
+    if b_i == 0:
+        continue
+    schema_dict["buildings"]["Building_"+str(b_i+1)]["include"] = False
+    schema_dict_eval["buildings"]["Building_"+str(b_i+1)]["include"] = False
+
 
 for i_episode in count(1):
     memories = [Memory() for _ in range(building_count)]
@@ -219,9 +231,10 @@ for i_episode in count(1):
         state = env.reset()     # list of lists
         # for s in state:
         #     print(len(s))
+        # print(state[0])
         state = [np.concatenate((running_state[i](state[i][:-building_count]), state[i][-building_count:])) for i in range(building_count)]
         # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
-
+        # print(state[0])
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
             action = [select_action(state[b]).item() for b in range(building_count)]
@@ -261,7 +274,7 @@ for i_episode in count(1):
     batch = Transition(*zip(*batch))
     update_params(batch, policy_net, value_net)
 
-    evaluation()
+    evaluation(schema_dict_eval)
 
     if i_episode > 1500:
         break
