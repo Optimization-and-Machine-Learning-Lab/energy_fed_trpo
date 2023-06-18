@@ -17,7 +17,9 @@ import sys
 sys.path.append('../CityLearn/')
 from citylearn.my_citylearn import CityLearnEnv
 
-wandb_record = True
+np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
+
+wandb_record = False
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl")
@@ -227,6 +229,7 @@ for i_episode in count(1):
 
     reward_batch /= num_episodes
     batch = memory.sample_batch()
+    states = np.array(batch.state)
     update_params(batch)
     wandb_step += 1
 
@@ -234,7 +237,7 @@ for i_episode in count(1):
         print('Episode {}\tLast reward: {}\tAverage reward {:.2f}'.format(
             i_episode, reward_sum/24, reward_batch/24))
         if wandb_record:
-            wandb.log({"train"+str(args.building_no+1): reward_sum/24}, step = int(wandb_step))
+            wandb.log({"train_"+str(args.building_no+1): reward_sum/24}, step = int(wandb_step))
     
     evaluation(schema_dict_eval)
         

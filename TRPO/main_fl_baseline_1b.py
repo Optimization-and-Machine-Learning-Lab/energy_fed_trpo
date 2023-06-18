@@ -18,7 +18,9 @@ import sys
 sys.path.append('../CityLearn/')
 from citylearn.my_citylearn import CityLearnEnv
 
-wandb_record = True
+np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
+
+wandb_record = False
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl")
@@ -59,7 +61,8 @@ env = CityLearnEnv(schema_filepath)
 num_inputs = env.observation_space[0].shape[0]
 num_actions = env.action_space[0].shape[0]
 
-# env.seed(args.seed)
+random.seed(args.seed)
+np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
 policy_net = Policy(num_inputs, num_actions)
