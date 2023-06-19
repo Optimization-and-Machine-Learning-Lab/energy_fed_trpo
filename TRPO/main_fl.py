@@ -20,14 +20,14 @@ from citylearn.my_citylearn import CityLearnEnv
 
 np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 
-building_count = 1
+building_count = 5
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
 wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl")
-    wandb.run.name = "FL_train_30-210_test_0_func_1b_test"
+    wandb.run.name = "FL_train_30-210_test_0_func_15000"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -50,7 +50,7 @@ parser.add_argument('--damping', type=float, default=1e-1, metavar='G',
                     help='damping (default: 1e-1)')
 parser.add_argument('--seed', type=int, default=543, metavar='N',
                     help='random seed (default: 1)')
-parser.add_argument('--batch-size', type=int, default=1500, metavar='N',
+parser.add_argument('--batch-size', type=int, default=15000, metavar='N',
                     help='random seed (default: 1)')
 parser.add_argument('--render', action='store_true',
                     help='render the environment')
@@ -67,7 +67,7 @@ num_inputs = env.observation_space[0].shape[0] + building_count
 num_actions = env.action_space[0].shape[0]
 # print("num_inputs", num_inputs)
 # random.seed(args.seed)
-# env.seed(args.seed)
+# np.random.seed(args.seed)
 # torch.manual_seed(args.seed)
 
 policy_net = Policy(num_inputs, num_actions)
@@ -98,8 +98,8 @@ def select_action_eval(state):
 def update_params(batch, policy_net, value_net):
     rewards = torch.Tensor(batch.reward)
     masks = torch.Tensor(batch.mask)
-    actions = torch.Tensor(np.concatenate(batch.action, 0))
-    states = torch.Tensor(batch.state)
+    actions = torch.Tensor(np.concatenate(batch.action, 0)).unsqueeze(-1)
+    states = torch.Tensor(np.array(batch.state))
     values = value_net(Variable(states))
 
     returns = torch.Tensor(actions.size(0),1)
@@ -169,7 +169,8 @@ def update_params(batch, policy_net, value_net):
 
     trpo_step(policy_net, get_loss, get_kl, args.max_kl, args.damping)
 
-running_state = [ZFilter((num_inputs-building_count,), clip=5) for _ in range(building_count)]
+# running_state = [ZFilter((num_inputs,), clip=5) for _ in range(building_count)]
+running_state = [ZFilter((num_inputs-building_count-1,), clip=5) for _ in range(building_count)]        # no mean for price and one-hot
 running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
 
 def evaluation(schema_dict_eval):
@@ -178,7 +179,8 @@ def evaluation(schema_dict_eval):
 
     done = False
     state = eval_env.reset()
-    state = [np.concatenate((running_state[i](state[i][:-building_count]), state[i][-building_count:])) for i in range(building_count)]
+    # state = [running_state[i](state[i]) for i in range(building_count)]
+    state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
     # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
 
     while not done:
@@ -187,7 +189,8 @@ def evaluation(schema_dict_eval):
         next_state, reward, done, _ = eval_env.step(action)
         eval_reward += reward
 
-        state = [np.concatenate((running_state[i](next_state[i][:-building_count]), next_state[i][-building_count:])) for i in range(building_count)]
+        # state = [running_state[i](next_state[i]) for i in range(building_count)]
+        state = [np.concatenate((running_state[i](next_state[i][:-(building_count+1)]), next_state[i][-(building_count+1):])) for i in range(building_count)]
         # state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
 
     for b in range(building_count):
@@ -205,11 +208,11 @@ with open(eval_schema_filepath) as json_eval_file:
 # schema_dict["personalization"] = False
 # schema_dict_eval["personalization"] = False
 
-for b_i in range(5):
-    if b_i == 0:
-        continue
-    schema_dict["buildings"]["Building_"+str(b_i+1)]["include"] = False
-    schema_dict_eval["buildings"]["Building_"+str(b_i+1)]["include"] = False
+# for b_i in range(5):
+#     if b_i == 0:
+#         continue
+#     schema_dict["buildings"]["Building_"+str(b_i+1)]["include"] = False
+#     schema_dict_eval["buildings"]["Building_"+str(b_i+1)]["include"] = False
 
 
 for i_episode in count(1):
@@ -229,19 +232,17 @@ for i_episode in count(1):
         env = CityLearnEnv(schema_dict)
 
         state = env.reset()     # list of lists
-        # for s in state:
-        #     print(len(s))
-        # print(state[0])
-        state = [np.concatenate((running_state[i](state[i][:-building_count]), state[i][-building_count:])) for i in range(building_count)]
+        # state = [running_state[i](state[i]) for i in range(building_count)]
+        state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
         # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
-        # print(state[0])
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
             action = [select_action(state[b]).item() for b in range(building_count)]
             next_state, reward, done, _ = env.step(action)
             reward_sum += reward
 
-            next_state = [np.concatenate((running_state[i](next_state[i][:-building_count]), next_state[i][-building_count:])) for i in range(building_count)]
+            # next_state = [running_state[i](next_state[i]) for i in range(building_count)]
+            next_state = [np.concatenate((running_state[i](next_state[i][:-(building_count+1)]), next_state[i][-(building_count+1):])) for i in range(building_count)]
             # next_state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
 
             mask = 1
