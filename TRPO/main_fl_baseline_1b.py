@@ -20,11 +20,11 @@ from citylearn.my_citylearn import CityLearnEnv
 
 np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 
-wandb_record = False
+wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl")
-    wandb.run.name = "train_60-240_test_0"
+    wandb.run.name = "train_60-240_test_0_1b"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -61,9 +61,9 @@ env = CityLearnEnv(schema_filepath)
 num_inputs = env.observation_space[0].shape[0]
 num_actions = env.action_space[0].shape[0]
 
-random.seed(args.seed)
-np.random.seed(args.seed)
-torch.manual_seed(args.seed)
+# random.seed(args.seed)
+# np.random.seed(args.seed)
+# torch.manual_seed(args.seed)
 
 policy_net = Policy(num_inputs, num_actions)
 value_net = Value(num_inputs)
