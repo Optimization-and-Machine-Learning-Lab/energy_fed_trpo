@@ -15,7 +15,7 @@ from trpo import trpo_step
 from utils import *
 
 import sys
-sys.path.append('../CityLearn/')
+sys.path.append('./CityLearn/')
 from citylearn.my_citylearn import CityLearnEnv
 
 np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
@@ -23,7 +23,7 @@ np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 building_count = 5
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
-wandb_record = True
+wandb_record = False
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl")
@@ -56,9 +56,10 @@ parser.add_argument('--render', action='store_true',
                     help='render the environment')
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
+parser.add_argument('--data-path', default='/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/', help='data schema path')
 args = parser.parse_args()
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
-eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
+schema_filepath = args.data_path+'schema.json'
+eval_schema_filepath = args.data_path+'schema_eval.json'
 
 
 env = CityLearnEnv(schema_filepath)
