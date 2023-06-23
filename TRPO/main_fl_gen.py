@@ -16,18 +16,18 @@ from utils import *
 
 import sys
 sys.path.append('./CityLearn/')
-from citylearn.gen_citylearn import CityLearnEnv
+from citylearn.my_citylearn import CityLearnEnv
 
 np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 
 building_count = 5
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
-wandb_record = True
+wandb_record = False
 if wandb_record:
     import wandb
-    wandb.init(project="TRPO_rl_gen")
-    wandb.run.name = "FL"
+    wandb.init(project="TRPO_rl")
+    wandb.run.name = "FL_train_30-210_test_0_func_15000"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -56,7 +56,7 @@ parser.add_argument('--render', action='store_true',
                     help='render the environment')
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
-parser.add_argument('--data-path', default='/home/yunxiang.li/FRL/CityLearn/citylearn/data/gen_data/', help='data schema path')
+parser.add_argument('--data-path', default='/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/', help='data schema path')
 args = parser.parse_args()
 schema_filepath = args.data_path+'schema.json'
 eval_schema_filepath = args.data_path+'schema_eval.json'
@@ -179,11 +179,7 @@ def evaluation(schema_dict_eval):
     eval_reward = np.array([0.] * building_count)
 
     done = False
-    # load_random = [random.random()*0.2 for i in range(building_count)]
-    # solar_random = [random.random()*0.1+1 for i in range(building_count)]
-    load_random = [0.1] * building_count
-    solar_random = [1.05] * building_count
-    state = eval_env.reset(load_random, solar_random)
+    state = eval_env.reset()
     # state = [running_state[i](state[i]) for i in range(building_count)]
     state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
     # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
@@ -230,10 +226,13 @@ for i_episode in count(1):
     num_steps = 0
 
     while num_steps < args.batch_size:  # 15000
+        date = random.randint(2*30, 8*30)#(183, 364)
+        schema_dict["simulation_start_time_step"] = date * 24
+        schema_dict["simulation_end_time_step"] = date * 24 + 23
+        # print("simulation_start_time_step", schema_dict["simulation_start_time_step"])
+        env = CityLearnEnv(schema_dict)
 
-        load_random = [random.random()*0.8+0.2 for i in range(building_count)]
-        solar_random = [random.random()*0.4+1.1 for i in range(building_count)]
-        state = env.reset(load_random, solar_random)     # list of lists
+        state = env.reset()     # list of lists
         # state = [running_state[i](state[i]) for i in range(building_count)]
         state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
         # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])

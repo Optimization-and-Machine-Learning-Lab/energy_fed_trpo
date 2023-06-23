@@ -1,1 +1,0 @@
-(trap 'kill 0' SIGINT; python main_fl_baseline_1b.py --building-no 0 & python main_fl_baseline_1b.py --building-no 1 & python main_fl_baseline_1b.py --building-no 2 & python main_fl_baseline_1b.py --building-no 3 & python main_fl_baseline_1b.py --building-no 4 & wait)

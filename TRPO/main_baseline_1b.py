@@ -1,4 +1,5 @@
 import json
+import random
 import argparse
 from itertools import count
 
@@ -14,15 +15,15 @@ from trpo import trpo_step
 from utils import *
 
 import sys
-sys.path.append('../CityLearn/')
-from citylearn.my_citylearn import CityLearnEnv
+sys.path.append('./CityLearn/')
+from citylearn.gen_citylearn import CityLearnEnv
 
 np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 
-wandb_record = False
+wandb_record = True
 if wandb_record:
     import wandb
-    wandb.init(project="TRPO_rl")
+    wandb.init(project="TRPO_rl_gen")
     wandb.run.name = "single_agent_baseline"
 wandb_step = 0
 
@@ -50,9 +51,10 @@ parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 parser.add_argument('--building-no', type=int, default=0,
                     help='trained building')
+parser.add_argument('--data-path', default='/home/yunxiang.li/FRL/CityLearn/citylearn/data/gen_data/', help='data schema path')
 args = parser.parse_args()
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
-eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
+schema_filepath = args.data_path+'schema.json'
+eval_schema_filepath = args.data_path+'schema_eval.json'
 
 env = CityLearnEnv(schema_filepath)
 
@@ -157,7 +159,11 @@ def evaluation(schema_dict_eval):
     eval_reward = 0.
 
     done = False
-    state = eval_env.reset()
+    # load_random = random.random()*0.2
+    # solar_random = random.random()*0.1+1
+    load_random = 0.1
+    solar_random = 1.05
+    state = eval_env.reset([load_random], [solar_random])
     state = running_state(state[0])
     # state = np.hstack(encoder*state[0])
 
@@ -201,7 +207,11 @@ for i_episode in count(1):
     num_episodes = 0
     while num_steps < args.batch_size:
 
-        state = env.reset()[0]
+        load_random = random.random()*0.2
+        solar_random = random.random()*0.1+1
+        # load_random = random.random()*0.8+0.2
+        # solar_random = random.random()*0.4+1.1
+        state = env.reset([load_random], [solar_random])[0]
         state = running_state(state)
 
         reward_sum = 0

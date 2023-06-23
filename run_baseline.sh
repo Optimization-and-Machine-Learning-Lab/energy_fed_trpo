@@ -1,0 +1,1 @@
+(trap 'kill 0' SIGINT; python TRPO/main_fl_baseline_1b.py --building-no 0 & python TRPO/main_fl_baseline_1b.py --building-no 1 & python TRPO/main_fl_baseline_1b.py --building-no 2 & python TRPO/main_fl_baseline_1b.py --building-no 3 & python TRPO/main_fl_baseline_1b.py --building-no 4 & wait)
