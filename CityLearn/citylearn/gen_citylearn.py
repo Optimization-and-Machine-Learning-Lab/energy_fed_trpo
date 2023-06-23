@@ -5,10 +5,10 @@ from typing import Any, List, Mapping, Tuple, Union
 from gym import Env, spaces
 import numpy as np
 import pandas as pd
-from citylearn.my_building import Building
+from citylearn.gen_building import Building
 from citylearn.cost_function import CostFunction
 from citylearn.data import DataSet, EnergySimulation, CarbonIntensity, Pricing, Weather
-from citylearn.my_reward_function import RewardFunction
+from citylearn.gen_reward_function import RewardFunction
 from citylearn.utilities import read_json
 from citylearn.rendering import get_background, RenderBuilding, get_plots
 
@@ -40,10 +40,13 @@ class CityLearnEnv(Env):
         else:
             return [list(b.observations.values()) for b in self.buildings]   # original one
 
-    def reset(self):
+
+    # test, lr \in [0, 0.2], sr \in [1, 1.1]
+    # train, lr \in [0.2, 2], sr \in [1.1, 1.5]
+    def reset(self, load_random, solar_random):
         self.time_step = 0
-        for building in self.buildings:
-            building.reset()
+        for building, lr, sr in zip(self.buildings, load_random, solar_random):
+            building.reset(lr, sr)
         # self.__net_electricity_consumption = []
         # self.__net_electricity_consumption.append(sum([b.net_electricity_consumption[self.time_step] for b in self.buildings]))
 
@@ -113,15 +116,13 @@ class CityLearnEnv(Env):
         for building_name, building_schema in self.schema['buildings'].items():
             if building_schema['include']:
                 # data
-                energy_simulation = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['energy_simulation'])).iloc[simulation_start_time_step:simulation_end_time_step + 1].copy()
+                energy_simulation = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['energy_simulation'])).copy()
                 energy_simulation = EnergySimulation(*energy_simulation.values.T)       # all building data, hour, month and so on
-                weather = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['weather'])).iloc[simulation_start_time_step:simulation_end_time_step + 1].copy()
-                weather = Weather(*weather.values.T)
 
                 carbon_intensity = None
 
                 if building_schema.get('pricing', None) is not None:
-                    pricing = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['pricing'])).iloc[simulation_start_time_step:simulation_end_time_step + 1].copy()
+                    pricing = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['pricing'])).copy()
                     pricing = Pricing(*pricing.values.T)
                 else:
                     pricing = None
@@ -135,23 +136,23 @@ class CityLearnEnv(Env):
                 # {'electrical_storage': True}
 
                 # construct building
-                building = Building(energy_simulation, weather, observation_metadata, action_metadata, carbon_intensity=carbon_intensity, pricing=pricing, name=building_name, seconds_per_time_step=seconds_per_time_step)
+                building = Building(energy_simulation, observation_metadata, action_metadata, carbon_intensity=carbon_intensity, pricing=pricing, name=building_name, seconds_per_time_step=seconds_per_time_step)
 
                 # update devices
-                device_metadata = ['electrical_storage', 'pv']
+                # device_metadata = ['electrical_storage', 'pv']
 
-                for name in device_metadata:
-                    if building_schema.get(name, None) is None:
-                        device = None
-                    else:
-                        device_type = building_schema[name]['type']
-                        device_module = '.'.join(device_type.split('.')[0:-1])
-                        device_name = device_type.split('.')[-1]
-                        constructor = getattr(importlib.import_module(device_module),device_name)
-                        attributes = building_schema[name].get('attributes',{})
-                        attributes['seconds_per_time_step'] = seconds_per_time_step
-                        device = constructor(**attributes)
-                        building.__setattr__(name, device)
+                # for name in device_metadata:
+                #     if building_schema.get(name, None) is None:
+                #         device = None
+                #     else:
+                #         device_type = building_schema[name]['type']
+                #         device_module = '.'.join(device_type.split('.')[0:-1])
+                #         device_name = device_type.split('.')[-1]
+                #         constructor = getattr(importlib.import_module(device_module),device_name)
+                #         attributes = building_schema[name].get('attributes',{})
+                #         attributes['seconds_per_time_step'] = seconds_per_time_step
+                #         device = constructor(**attributes)
+                #         building.__setattr__(name, device)
                 
                 building.observation_space = building.estimate_observation_space()
                 building.action_space = building.estimate_action_space()
