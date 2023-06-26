@@ -181,8 +181,8 @@ def evaluation(schema_dict_eval):
     done = False
     # load_random = [random.random()*0.2 for i in range(building_count)]
     # solar_random = [random.random()*0.1+1 for i in range(building_count)]
-    load_random = [0.1] * building_count
-    solar_random = [1.05] * building_count
+    load_random = [0.05] * building_count
+    solar_random = [2.05] * building_count
     state = eval_env.reset(load_random, solar_random)
     # state = [running_state[i](state[i]) for i in range(building_count)]
     state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
@@ -231,8 +231,8 @@ for i_episode in count(1):
 
     while num_steps < args.batch_size:  # 15000
 
-        load_random = [random.random()*0.8+0.2 for i in range(building_count)]
-        solar_random = [random.random()*0.4+1.1 for i in range(building_count)]
+        load_random = [random.random()*0.9+0.1 for i in range(building_count)]
+        solar_random = [random.random()*0.4+2.1 for i in range(building_count)]
         state = env.reset(load_random, solar_random)     # list of lists
         # state = [running_state[i](state[i]) for i in range(building_count)]
         state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]

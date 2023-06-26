@@ -163,8 +163,8 @@ def evaluation(schema_dict_eval):
     done = False
     # load_random = random.random()*0.2
     # solar_random = random.random()*0.1+1
-    load_random = 0.1
-    solar_random = 1.05
+    load_random = 0.05
+    solar_random = 2.05
     state = eval_env.reset([load_random], [solar_random])
     # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
     state = running_state(state[0])
@@ -209,8 +209,8 @@ for i_episode in count(1):
     num_episodes = 0
     while num_steps < args.batch_size:
 
-        load_random = random.random()*0.8+0.2
-        solar_random = random.random()*0.4+1.1
+        load_random = random.random()*0.9+0.1
+        solar_random = random.random()*0.4+2.1
         state = env.reset([load_random], [solar_random])[0]
         state = running_state(state)
 
