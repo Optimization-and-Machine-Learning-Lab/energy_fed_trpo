@@ -23,6 +23,7 @@ class RewardFunction:
         self.electricity_consumption = electricity_consumption
         self.carbon_emission = carbon_emission
         self.electricity_price = electricity_price
+        self.__diff_square = 0
         self.kwargs = kwargs
 
     @property
@@ -53,6 +54,10 @@ class RewardFunction:
     def kwargs(self) ->Mapping[Any,Any]:
         return self.__kwargs
 
+    @property
+    def diff_square(self) -> List[float]:
+        return self.__diff_square
+
     @agent_count.setter
     def agent_count(self, agent_count: int):
         self.__agent_count = agent_count
@@ -73,6 +78,10 @@ class RewardFunction:
     def kwargs(self, kwargs: Mapping[Any, Any]):
         self.__kwargs = kwargs
 
+    @diff_square.setter
+    def diff_square(self, diff_square):
+        self.__diff_square = diff_square
+
     def calculate(self) -> List[float]:
         r"""Calculates default reward.
 
@@ -83,7 +92,8 @@ class RewardFunction:
         """
         electricity_consumption = (np.array(self.electricity_consumption)*-1).clip(max=0).tolist()
         electricity_price = [self.electricity_price[i]*electricity_consumption[i] for i in range(self.agent_count)]
-        return electricity_price
+        reward = [electricity_price[i] - self.diff_square[i] for i in range(self.agent_count)]
+        return reward
 
     
 class MARL(RewardFunction):

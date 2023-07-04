@@ -11,57 +11,24 @@ from citylearn.preprocessing import Encoder, PeriodicNormalization, OnehotEncodi
 # TODO: remove everything about price and carbon
 class Building():
     def __init__(
-        self, energy_simulation: EnergySimulation, observation_metadata: Mapping[str, bool], action_metadata: Mapping[str, bool],
+        self, ac_efficiency, solar_efficiency, panel, solar_intercept, energy_simulation: EnergySimulation, weather: Weather, observation_metadata: Mapping[str, bool], action_metadata: Mapping[str, bool],
         pricing: Pricing = None, electrical_storage: Battery = None, pv: PV = None, name: str = None, **kwargs
     ):
-        r"""Initialize `Building`.
-
-        Parameters
-        ----------
-        energy_simulation : EnergySimulation
-            Temporal features, cooling, heating, dhw and plug loads, solar generation and indoor environment time series.
-        weather : Weather
-            Outdoor weather conditions and forecasts time sereis.
-        observation_metadata : dict
-            Mapping of active and inactive observations.
-        action_metadata : dict
-            Mapping od active and inactive actions.
-        carbon_intensity : CarbonIntensity, optional
-            Carbon dioxide emission rate time series.
-        pricing : Pricing, optional
-            Energy pricing and forecasts time series.
-        dhw_storage : StorageTank, optional
-            Hot water storage object for domestic hot water.
-        cooling_storage : StorageTank, optional
-            Cold water storage object for space cooling.
-        heating_storage : StorageTank, optional
-            Hot water storage object for space heating.
-        electrical_storage : Battery, optional
-            Electric storage object for meeting electric loads.
-        dhw_device : Union[HeatPump, ElectricHeater], optional
-            Electric device for meeting hot domestic hot water demand and charging `dhw_storage`.
-        cooling_device : HeatPump, optional
-            Electric device for meeting space cooling demand and charging `cooling_storage`.
-        heating_device : Union[HeatPump, ElectricHeater], optional
-            Electric device for meeting space heating demand and charging `heating_storage`.
-        pv : PV, optional
-            PV object for offsetting electricity demand from grid.
-        name : str, optional
-            Unique building name.
-
-        Other Parameters
-        ----------------
-        **kwargs : dict
-            Other keyword arguments used to initialize super class.
-        """
-
         self.name = name
+        self.ac_efficiency = ac_efficiency
+        self.solar_efficiency = solar_efficiency
+        self.panel = panel
+        self.solar_intercept = solar_intercept
+
         self.energy_simulation = energy_simulation
+        self.weather = weather
         self.electrical_storage = Battery(1.0, 1.0)
         self.pv = PV(1.0)
         self.pricing = pricing
         self.__solar_generation_base = self.energy_simulation.solar_generation
         self.__non_shiftable_load_base = self.energy_simulation.non_shiftable_load
+        self.__temperature_base = weather.outdoor_dry_bulb_temperature
+        self.__humidity_base = weather.outdoor_relative_humidity
         
         self.observation_metadata = observation_metadata
         self.action_metadata = action_metadata
@@ -92,6 +59,7 @@ class Building():
         data = {
             'solar_generation':np.array(self.pv.get_generation(self.energy_simulation.solar_generation)),
             **vars(self.energy_simulation),
+            **vars(self.weather),
             **vars(self.pricing),
         }
 
@@ -132,6 +100,9 @@ class Building():
         data = {
             **{k: v[self.time_step] for k, v in vars(self.pricing).items()},
             # **{k: v[self.time_step] for k, v in vars(self.energy_simulation).items()},
+            'hour':self.energy_simulation.hour[self.time_step],
+            'outdoor_dry_bulb_temperature':self.__outdoor_dry_bulb_temperature[self.time_step],
+            'outdoor_relative_humidity':self.__humidity[self.time_step],
             'non_shiftable_load':self.__non_shiftable_load[self.time_step],
             'solar_generation':self.__solar_generation[self.time_step],
             'electrical_storage_soc':self.electrical_storage.soc[self.time_step],
@@ -144,13 +115,15 @@ class Building():
         assert len(unknown_observations) == 0, f'Unkown observations: {unknown_observations}'
         return observations
 
-    def reset(self, lr, sr):
+    def reset(self, temp_random, hum_random):
         self.time_step = 0
         self.electrical_storage.reset()
         self.pv.reset()
 
-        self.__non_shiftable_load = self.__non_shiftable_load_base + lr
-        self.__solar_generation = self.pv.get_generation((self.__solar_generation_base * sr)) * -1
+        self.__outdoor_dry_bulb_temperature = self.__temperature_base + temp_random
+        self.__humidity = self.__humidity_base + hum_random
+        self.__non_shiftable_load = (self.__humidity-60)/20/self.ac_efficiency + (30-self.__outdoor_dry_bulb_temperature)/25/self.ac_efficiency + self.__non_shiftable_load_base
+        self.__solar_generation = self.pv.get_generation((self.__outdoor_dry_bulb_temperature*self.solar_efficiency*self.panel**2) * self.__solar_generation_base) * -1
         
         self.__net_electricity_consumption = []
         self.__net_electricity_consumption_price = []
@@ -184,47 +157,47 @@ class Building():
     def net_electricity_consumption_price(self) -> List[float]:
         return self.__net_electricity_consumption_price
 
-    @property
-    def observation_encoders(self) -> List[Encoder]:
-        r"""Get observation value transformers/encoders for use in agent algorithm.
+    # @property
+    # def observation_encoders(self) -> List[Encoder]:
+    #     r"""Get observation value transformers/encoders for use in agent algorithm.
 
-        The encoder classes are defined in the `preprocessing.py` module and include `PeriodicNormalization` for cyclic observations,
-        `OnehotEncoding` for categorical obeservations, `RemoveFeature` for non-applicable observations given available storage systems and devices
-        and `Normalize` for observations with known mnimum and maximum boundaries.
+    #     The encoder classes are defined in the `preprocessing.py` module and include `PeriodicNormalization` for cyclic observations,
+    #     `OnehotEncoding` for categorical obeservations, `RemoveFeature` for non-applicable observations given available storage systems and devices
+    #     and `Normalize` for observations with known mnimum and maximum boundaries.
         
-        Returns
-        -------
-        encoders : List[Encoder]
-            Encoder classes for observations ordered with respect to `active_observations`.
-        """
+    #     Returns
+    #     -------
+    #     encoders : List[Encoder]
+    #         Encoder classes for observations ordered with respect to `active_observations`.
+    #     """
 
-        remove_features = ['net_electricity_consumption']
-        demand_observations = {
-            'electrical_storage_soc': np.nansum(np.nansum([
-                self.energy_simulation.non_shiftable_load
-            ], axis = 0)),
-            'non_shiftable_load': np.nansum(self.energy_simulation.non_shiftable_load),
-        }
-        remove_features += [k for k, v in demand_observations.items() if v == 0]
-        remove_features = [f for f in remove_features if f in self.active_observations]
-        encoders = []
+    #     remove_features = ['net_electricity_consumption']
+    #     demand_observations = {
+    #         'electrical_storage_soc': np.nansum(np.nansum([
+    #             self.energy_simulation.non_shiftable_load
+    #         ], axis = 0)),
+    #         'non_shiftable_load': np.nansum(self.energy_simulation.non_shiftable_load),
+    #     }
+    #     remove_features += [k for k, v in demand_observations.items() if v == 0]
+    #     remove_features = [f for f in remove_features if f in self.active_observations]
+    #     encoders = []
 
-        for i, observation in enumerate(self.active_observations):
-            if observation in ['month', 'hour']:
-                encoders.append(PeriodicNormalization(self.observation_space.high[i]))
+    #     for i, observation in enumerate(self.active_observations):
+    #         if observation in ['month', 'hour']:
+    #             encoders.append(PeriodicNormalization(self.observation_space.high[i]))
             
-            elif observation == 'day_type':
-                encoders.append(OnehotEncoding([1, 2, 3, 4, 5, 6, 7, 8]))
+    #         elif observation == 'day_type':
+    #             encoders.append(OnehotEncoding([1, 2, 3, 4, 5, 6, 7, 8]))
             
-            elif observation == "daylight_savings_status":
-                encoders.append(OnehotEncoding([0, 1]))
+    #         elif observation == "daylight_savings_status":
+    #             encoders.append(OnehotEncoding([0, 1]))
             
-            elif observation in remove_features:
-                # encoders.append(RemoveFeature())
-                encoders.append(NoNormalization())
+    #         elif observation in remove_features:
+    #             # encoders.append(RemoveFeature())
+    #             encoders.append(NoNormalization())
             
-            else:
-                # print("encoder", observation, self.observation_space.low[i], self.observation_space.high[i])
-                encoders.append(Normalize(self.observation_space.low[i], self.observation_space.high[i]))
+    #         else:
+    #             # print("encoder", observation, self.observation_space.low[i], self.observation_space.high[i])
+    #             encoders.append(Normalize(self.observation_space.low[i], self.observation_space.high[i]))
 
-        return encoders
+    #     return encoders

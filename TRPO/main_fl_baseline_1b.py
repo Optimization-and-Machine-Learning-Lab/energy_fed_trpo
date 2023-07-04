@@ -24,7 +24,7 @@ wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_gen")
-    wandb.run.name = "FL_baseline"
+    wandb.run.name = "FL_baseline_diff"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -163,9 +163,9 @@ def evaluation(schema_dict_eval):
     done = False
     # load_random = random.random()*0.2
     # solar_random = random.random()*0.1+1
-    load_random = 0.05
-    solar_random = 2.05
-    state = eval_env.reset([load_random], [solar_random])
+    temp_random = 21
+    hum_random = 51
+    state = eval_env.reset([temp_random], [hum_random])
     # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
     state = running_state(state[0])
 
@@ -209,9 +209,9 @@ for i_episode in count(1):
     num_episodes = 0
     while num_steps < args.batch_size:
 
-        load_random = random.random()*0.9+0.1
-        solar_random = random.random()*0.4+2.1
-        state = env.reset([load_random], [solar_random])[0]
+        temp_random = random.random()*5+15
+        hum_random = random.random()*50
+        state = env.reset([temp_random], [hum_random])[0]
         state = running_state(state)
 
         reward_sum = 0
@@ -250,5 +250,5 @@ for i_episode in count(1):
     
     evaluation(schema_dict_eval)
         
-    if i_episode > 1000:
+    if i_episode > 1500:
         break

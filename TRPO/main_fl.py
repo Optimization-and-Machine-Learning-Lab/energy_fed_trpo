@@ -27,7 +27,7 @@ wandb_record = True
 if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_gen")
-    wandb.run.name = "FL"
+    wandb.run.name = "FL_diff"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -181,9 +181,9 @@ def evaluation(schema_dict_eval):
     done = False
     # load_random = [random.random()*0.2 for i in range(building_count)]
     # solar_random = [random.random()*0.1+1 for i in range(building_count)]
-    load_random = [0.05] * building_count
-    solar_random = [2.05] * building_count
-    state = eval_env.reset(load_random, solar_random)
+    temp_random = [21] * building_count
+    hum_random = [51] * building_count
+    state = eval_env.reset(temp_random, hum_random)
     # state = [running_state[i](state[i]) for i in range(building_count)]
     state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
     # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
@@ -231,9 +231,9 @@ for i_episode in count(1):
 
     while num_steps < args.batch_size:  # 15000
 
-        load_random = [random.random()*0.9+0.1 for i in range(building_count)]
-        solar_random = [random.random()*0.4+2.1 for i in range(building_count)]
-        state = env.reset(load_random, solar_random)     # list of lists
+        temp_random = [random.random()*5+15 for i in range(building_count)]
+        hum_random = [random.random()*50 for i in range(building_count)]
+        state = env.reset(temp_random, hum_random)     # list of lists
         # state = [running_state[i](state[i]) for i in range(building_count)]
         state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
         # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
@@ -279,5 +279,5 @@ for i_episode in count(1):
 
     evaluation(schema_dict_eval)
 
-    if i_episode > 1500:
+    if i_episode > 3000:
         break

@@ -8,7 +8,7 @@
   "personalization": true,
   "observations": {
     "month": {
-      "active": true,
+      "active": false,
       "shared_in_central_agent": true
     },
     "day_type": {
@@ -24,7 +24,7 @@
       "shared_in_central_agent": true
     },
     "outdoor_dry_bulb_temperature": {
-      "active": false,
+      "active": true,
       "shared_in_central_agent": true
     },
     "outdoor_dry_bulb_temperature_predicted_6h": {
@@ -40,7 +40,7 @@
       "shared_in_central_agent": true
     },
     "outdoor_relative_humidity": {
-      "active": false,
+      "active": true,
       "shared_in_central_agent": true
     },
     "outdoor_relative_humidity_predicted_6h": {
@@ -190,7 +190,7 @@
     "Building_1": {
       "include": true,
       "energy_simulation": "building_1.csv",
-      "weather": "weather_func_1.csv",
+      "weather": "weather_1.csv",
       "pricing": "pricing_1.csv",
       "inactive_observations": [],
       "inactive_actions": [],
@@ -216,7 +216,7 @@
     "Building_2": {
       "include": true,
       "energy_simulation": "building_2.csv",
-      "weather": "weather_func_2.csv",
+      "weather": "weather_2.csv",
       "pricing": "pricing_1.csv",
       "inactive_observations": [],
       "inactive_actions": [],
@@ -242,7 +242,7 @@
     "Building_3": {
       "include": true,
       "energy_simulation": "building_3.csv",
-      "weather": "weather_func_3.csv",
+      "weather": "weather_3.csv",
       "pricing": "pricing_1.csv",
       "inactive_observations": [],
       "inactive_actions": [],
@@ -268,7 +268,7 @@
     "Building_4": {
       "include": true,
       "energy_simulation": "building_4.csv",
-      "weather": "weather_func_4.csv",
+      "weather": "weather_4.csv",
       "pricing": "pricing_1.csv",
       "inactive_observations": [],
       "inactive_actions": [],
@@ -294,7 +294,7 @@
     "Building_5": {
       "include": true,
       "energy_simulation": "building_5.csv",
-      "weather": "weather_func_5.csv",
+      "weather": "weather_5.csv",
       "pricing": "pricing_1.csv",
       "inactive_observations": [],
       "inactive_actions": [],
