@@ -64,6 +64,11 @@ eval_schema_filepath = args.data_path+'schema_eval.json'
 
 env = CityLearnEnv(schema_filepath)
 
+with open(schema_filepath) as json_file:
+    schema_dict = json.load(json_file)
+with open(eval_schema_filepath) as json_eval_file:
+    schema_dict_eval = json.load(json_eval_file)
+
 num_inputs = env.observation_space[0].shape[0] + building_count
 num_actions = env.action_space[0].shape[0]
 # print("num_inputs", num_inputs)
@@ -181,11 +186,7 @@ def evaluation(schema_dict_eval):
     eval_reward = np.array([0.] * building_count)
 
     done = False
-    # load_random = [random.random()*0.2 for i in range(building_count)]
-    # solar_random = [random.random()*0.1+1 for i in range(building_count)]
-    temp_random = [21] * building_count
-    hum_random = [51] * building_count
-    state = eval_env.reset(temp_random, hum_random)
+    state = eval_env.reset()
     # state = [running_state[i](state[i]) for i in range(building_count)]
     state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
     # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
@@ -207,10 +208,6 @@ def evaluation(schema_dict_eval):
         for b in range(building_count):
             wandb.log({"eval_"+str(b+1): eval_reward[b]/24}, step = int(wandb_step))
 
-with open(schema_filepath) as json_file:
-    schema_dict = json.load(json_file)
-with open(eval_schema_filepath) as json_eval_file:
-    schema_dict_eval = json.load(json_eval_file)
 
 # schema_dict["personalization"] = False
 # schema_dict_eval["personalization"] = False
@@ -232,10 +229,7 @@ for i_episode in count(1):
     num_steps = 0
 
     while num_steps < args.batch_size:  # 15000
-
-        temp_random = [random.random()*5+15 for i in range(building_count)]
-        hum_random = [random.random()*50 for i in range(building_count)]
-        state = env.reset(temp_random, hum_random)     # list of lists
+        state = env.reset()     # list of lists
         # state = [running_state[i](state[i]) for i in range(building_count)]
         state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
         # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])

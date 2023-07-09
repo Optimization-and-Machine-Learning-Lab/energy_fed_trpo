@@ -1,4 +1,5 @@
 import math
+import random
 from typing import List, Mapping, Union
 from gym import spaces
 import numpy as np
@@ -11,14 +12,19 @@ from citylearn.preprocessing import Encoder, PeriodicNormalization, OnehotEncodi
 # TODO: remove everything about price and carbon
 class Building():
     def __init__(
-        self, ac_efficiency, solar_efficiency, panel, solar_intercept, energy_simulation: EnergySimulation, weather: Weather, observation_metadata: Mapping[str, bool], action_metadata: Mapping[str, bool],
+        self, 
+        # ac_efficiency, solar_efficiency, panel, solar_intercept, 
+        schema,
+        energy_simulation: EnergySimulation, weather: Weather, observation_metadata: Mapping[str, bool], action_metadata: Mapping[str, bool],
         pricing: Pricing = None, electrical_storage: Battery = None, pv: PV = None, name: str = None, **kwargs
     ):
         self.name = name
-        self.ac_efficiency = ac_efficiency
-        self.solar_efficiency = solar_efficiency
-        self.panel = panel
-        self.solar_intercept = solar_intercept
+        self.ac_efficiency = schema["ac_efficiency"]
+        self.solar_efficiency = schema["solar_efficiency"]
+        self.panel = schema["solar_panel"]
+        self.solar_intercept = schema["solar_intercept"]
+        self.temp_random_b, self.temp_random_1_e = schema["temp_random"]
+        self.hum_random_b, self.hum_random_1_e = schema["hum_random"]
 
         self.energy_simulation = energy_simulation
         self.weather = weather
@@ -36,6 +42,8 @@ class Building():
         self.active_observations = [k for k, v in self.observation_metadata.items() if v]
         self.observation_space = self.estimate_observation_space()
         self.action_space = self.estimate_action_space()
+
+        self.hour_encoder = PeriodicNormalization(23.0)
         
         self.time_step = 0
 
@@ -81,6 +89,12 @@ class Building():
                 low_limit.append(0.0)
                 high_limit.append(1.0)
 
+            elif key == "hour":
+                low_limit.append(-1.0)
+                low_limit.append(-1.0)
+                high_limit.append(1.0)
+                high_limit.append(1.0)
+
             else:
                 low_limit.append(min(data[key]))
                 high_limit.append(max(data[key]))
@@ -100,7 +114,7 @@ class Building():
         data = {
             **{k: v[self.time_step] for k, v in vars(self.pricing).items()},
             # **{k: v[self.time_step] for k, v in vars(self.energy_simulation).items()},
-            'hour':self.energy_simulation.hour[self.time_step],
+            'hour':self.energy_simulation.hour[self.time_step]*self.hour_encoder,
             'outdoor_dry_bulb_temperature':self.__outdoor_dry_bulb_temperature[self.time_step],
             'outdoor_relative_humidity':self.__humidity[self.time_step],
             'non_shiftable_load':self.__non_shiftable_load[self.time_step],
@@ -115,7 +129,10 @@ class Building():
         assert len(unknown_observations) == 0, f'Unkown observations: {unknown_observations}'
         return observations
 
-    def reset(self, temp_random, hum_random):
+    def reset(self):#, temp_random, hum_random):
+        temp_random = random.random() * (self.temp_random_b-self.temp_random_1_e) + self.temp_random_b
+        hum_random = random.random() * (self.hum_random_b-self.hum_random_1_e) + self.hum_random_b
+
         self.time_step = 0
         self.electrical_storage.reset()
         self.pv.reset()

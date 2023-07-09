@@ -36,17 +36,21 @@ class CityLearnEnv(Env):
         """
 
         if self.one_hot:
-            return [list(self.buildings[b].observations.values()) + [1 if b==j else 0 for j in range(len(self.buildings))] for b in range(len(self.buildings))]
+            tmp = [list(self.buildings[b].observations.values()) + [1 if b==j else 0 for j in range(len(self.buildings))] for b in range(len(self.buildings))]
+            tmp = [np.concatenate((t[0], t[1:]))for t in tmp]
+            return tmp
         else:
-            return [list(b.observations.values()) for b in self.buildings]   # original one
+            tmp = [list(b.observations.values()) for b in self.buildings]
+            tmp = [np.concatenate((t[0], t[1:]))for t in tmp]
+            return tmp   # original one
 
 
     # test, temp_random \in [20, 21], hum_random \in [50, 51]
     # train, temp_random \in [0, 20], shum_randomr \in [0, 50]
-    def reset(self, temp_random, hum_random):
+    def reset(self):
         self.time_step = 0
-        for building, lr, sr in zip(self.buildings, temp_random, hum_random):
-            building.reset(lr, sr)
+        for building in self.buildings:
+            building.reset()
         # self.__net_electricity_consumption = []
         # self.__net_electricity_consumption.append(sum([b.net_electricity_consumption[self.time_step] for b in self.buildings]))
 
@@ -116,14 +120,13 @@ class CityLearnEnv(Env):
         seconds_per_time_step = self.schema['seconds_per_time_step']
         buildings = ()
 
-        ac_efficiency = [1, 1.2, 2.1, 0.9, 0.8]
-        solar_intercept = [3, 4, 5, 3.5, 2.5]
-        solar_efficiency = [1, 1.2, 0.5, 0.8, 1.2]#[3, 5, 2, 2.5, 5]
-        solar_panel = [0.6, 0.5, 0.5, 0.9, 0.6]
+        # ac_efficiency = [1, 1.2, 2.1, 0.9, 0.8]
+        # solar_intercept = [3, 4, 5, 3.5, 2.5]
+        # solar_efficiency = [1, 1.2, 0.5, 0.8, 1.2]#[3, 5, 2, 2.5, 5]
+        # solar_panel = [0.6, 0.5, 0.5, 0.9, 0.6]
         
         for building_name, building_schema in self.schema['buildings'].items():
             if building_schema['include']:
-                index = int(building_name[-1])-1
                 # data
                 energy_simulation = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['energy_simulation'])).copy()
                 energy_simulation = EnergySimulation(*energy_simulation.values.T)       # all building data, hour, month and so on
@@ -147,8 +150,9 @@ class CityLearnEnv(Env):
                 # {'electrical_storage': True}
 
                 # construct building
-                building = Building(ac_efficiency[index], solar_efficiency[index], solar_panel[index], solar_intercept[index], energy_simulation, weather, 
-                                    observation_metadata, action_metadata, carbon_intensity=carbon_intensity, pricing=pricing, 
+                building = Building(#building_schema["ac_efficiency"], building_schema["solar_efficiency"], building_schema["solar_panel"], building_schema["solar_intercept"], 
+                                    building_schema,
+                                    energy_simulation, weather, observation_metadata, action_metadata, carbon_intensity=carbon_intensity, pricing=pricing, 
                                     name=building_name, seconds_per_time_step=seconds_per_time_step)
 
                 # update devices
