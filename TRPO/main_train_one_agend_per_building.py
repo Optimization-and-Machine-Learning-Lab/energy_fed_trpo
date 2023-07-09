@@ -161,11 +161,7 @@ def evaluation(schema_dict_eval):
     eval_reward = 0.
 
     done = False
-    # load_random = random.random()*0.2
-    # solar_random = random.random()*0.1+1
-    temp_random = 21
-    hum_random = 51
-    state = eval_env.reset([temp_random], [hum_random])
+    state = eval_env.reset()
     # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
     state = running_state(state[0])
 
@@ -209,9 +205,7 @@ for i_episode in count(1):
     num_episodes = 0
     while num_steps < args.batch_size:
 
-        temp_random = random.random()*5+15
-        hum_random = random.random()*50
-        state = env.reset([temp_random], [hum_random])[0]
+        state = env.reset()[0]
         state = running_state(state)
 
         reward_sum = 0
