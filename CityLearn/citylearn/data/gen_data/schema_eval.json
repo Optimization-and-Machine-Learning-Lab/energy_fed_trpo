@@ -7,18 +7,6 @@
   "seconds_per_time_step": 3600,
   "personalization": true,
   "observations": {
-    "month": {
-      "active": false,
-      "shared_in_central_agent": true
-    },
-    "day_type": {
-      "active": false,
-      "shared_in_central_agent": true
-    },
-    "hour": {
-      "active": true,
-      "shared_in_central_agent": true
-    },
     "daylight_savings_status": {
       "active": false,
       "shared_in_central_agent": true
@@ -104,11 +92,11 @@
       "shared_in_central_agent": false
     },
     "non_shiftable_load": {
-      "active": true,
+      "active": false,
       "shared_in_central_agent": false
     },
     "solar_generation": {
-      "active": true,
+      "active": false,
       "shared_in_central_agent": false
     },
     "cooling_storage_soc": {
@@ -146,6 +134,18 @@
     "electricity_pricing_predicted_24h": {
       "active": false,
       "shared_in_central_agent": false
+    },
+    "month": {
+      "active": false,
+      "shared_in_central_agent": true
+    },
+    "day_type": {
+      "active": false,
+      "shared_in_central_agent": true
+    },
+    "hour": {
+      "active": true,
+      "shared_in_central_agent": true
     }
   },
   "actions": {

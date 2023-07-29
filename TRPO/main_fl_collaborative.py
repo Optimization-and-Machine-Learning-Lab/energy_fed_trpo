@@ -23,10 +23,10 @@ np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 building_count = 5
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
-wandb_record = True
+wandb_record = False
 if wandb_record:
     import wandb
-    wandb.init(project="TRPO_rl_gen")
+    wandb.init(project="TRPO_rl_gen_model")
     wandb.run.name = "FL_diff"
 wandb_step = 0
 
@@ -178,7 +178,8 @@ def update_params(batch, policy_net, value_net):
     trpo_step(policy_net, get_loss, get_kl, args.max_kl, args.damping)
 
 # running_state = [ZFilter((num_inputs,), clip=5) for _ in range(building_count)]
-running_state = [ZFilter((num_inputs-building_count-1,), clip=5) for _ in range(building_count)]        # no mean for price and one-hot
+# state: [onehot, temperature, humidity, battery_storage, consumption, price, hour1, hour2]
+running_state = [ZFilter((num_inputs-building_count,), clip=5) for _ in range(building_count)]        # no mean for price and one-hot
 running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
 
 def evaluation(schema_dict_eval):
@@ -188,7 +189,7 @@ def evaluation(schema_dict_eval):
     done = False
     state = eval_env.reset()
     # state = [running_state[i](state[i]) for i in range(building_count)]
-    state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
+    state = [np.concatenate((state[i][:building_count], running_state[i](state[i][building_count:]))) for i in range(building_count)]
     # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
 
     while not done:
@@ -198,7 +199,7 @@ def evaluation(schema_dict_eval):
         eval_reward += reward
 
         # state = [running_state[i](next_state[i]) for i in range(building_count)]
-        state = [np.concatenate((running_state[i](next_state[i][:-(building_count+1)]), next_state[i][-(building_count+1):])) for i in range(building_count)]
+        state = [np.concatenate((next_state[i][:building_count], running_state[i](next_state[i][building_count:]))) for i in range(building_count)]
         # state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
 
     for b in range(building_count):
@@ -230,8 +231,7 @@ for i_episode in count(1):
 
     while num_steps < args.batch_size:  # 15000
         state = env.reset()     # list of lists
-        # state = [running_state[i](state[i]) for i in range(building_count)]
-        state = [np.concatenate((running_state[i](state[i][:-(building_count+1)]), state[i][-(building_count+1):])) for i in range(building_count)]
+        state = [np.concatenate((state[i][:building_count], running_state[i](state[i][building_count:]))) for i in range(building_count)]
         # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
@@ -240,7 +240,7 @@ for i_episode in count(1):
             reward_sum += reward
 
             # next_state = [running_state[i](next_state[i]) for i in range(building_count)]
-            next_state = [np.concatenate((running_state[i](next_state[i][:-(building_count+1)]), next_state[i][-(building_count+1):])) for i in range(building_count)]
+            next_state = [np.concatenate((next_state[i][:building_count], running_state[i](next_state[i][building_count:]))) for i in range(building_count)]
             # next_state = np.array([[j for j in np.hstack(encoders[i]*next_state[i][:-5]) if j != None] + next_state[i][-5:] for i in range(5)])
 
             mask = 1

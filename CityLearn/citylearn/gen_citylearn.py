@@ -36,12 +36,12 @@ class CityLearnEnv(Env):
         """
 
         if self.one_hot:
-            tmp = [list(self.buildings[b].observations.values()) + [1 if b==j else 0 for j in range(len(self.buildings))] for b in range(len(self.buildings))]
-            tmp = [np.concatenate((t[0], t[1:]))for t in tmp]
+            tmp = [[1 if b==j else 0 for j in range(len(self.buildings))] + list(self.buildings[b].observations.values()) for b in range(len(self.buildings))]
+            tmp = np.array([np.concatenate((t[:-1], t[-1]))for t in tmp]).astype(np.float32)
             return tmp
         else:
             tmp = [list(b.observations.values()) for b in self.buildings]
-            tmp = [np.concatenate((t[0], t[1:]))for t in tmp]
+            tmp = np.array([np.concatenate((t[:-1], t[-1]))for t in tmp]).astype(np.float32)
             return tmp   # original one
 
 
