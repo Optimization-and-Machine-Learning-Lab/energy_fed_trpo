@@ -244,5 +244,5 @@ for i_episode in count(1):
     
     evaluation(schema_dict_eval)
         
-    if i_episode > 1500:
+    if i_episode > 3000:
         break
