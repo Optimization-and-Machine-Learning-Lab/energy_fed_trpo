@@ -49,7 +49,7 @@ class Policy(nn.Module):
             other = torch.tanh(self.other_fc(x[:, -5:]))
 
             demand = torch.tanh(self.demand_fc(torch.cat((temp_hum, one_hot_demand), 1)))
-            solar = torch.tanh(self.demand_fc(torch.cat((temp_hum, one_hot_solar), 1)))
+            solar = torch.tanh(self.solar_fc(torch.cat((temp_hum, one_hot_solar), 1)))
 
             x = torch.tanh(self.fc(torch.cat((demand, solar, other), 1)))
 
@@ -105,7 +105,7 @@ class Value(nn.Module):
             other = torch.tanh(self.other_fc(x[:, -5:]))
 
             demand = torch.tanh(self.demand_fc(torch.cat((temp_hum, one_hot_demand), 1)))
-            solar = torch.tanh(self.demand_fc(torch.cat((temp_hum, one_hot_solar), 1)))
+            solar = torch.tanh(self.solar_fc(torch.cat((temp_hum, one_hot_solar), 1)))
 
             x = torch.tanh(self.fc(torch.cat((demand, solar, other), 1)))
 

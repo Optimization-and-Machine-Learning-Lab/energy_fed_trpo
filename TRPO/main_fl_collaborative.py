@@ -23,11 +23,11 @@ np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 building_count = 5
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
-wandb_record = False
+wandb_record = True
 if wandb_record:
     import wandb
-    wandb.init(project="TRPO_rl_gen_model")
-    wandb.run.name = "FL_diff"
+    wandb.init(project="TRPO_rl_gen")
+    wandb.run.name = "FL_diff_model"
 wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
@@ -180,7 +180,7 @@ def update_params(batch, policy_net, value_net):
 # running_state = [ZFilter((num_inputs,), clip=5) for _ in range(building_count)]
 # state: [onehot, temperature, humidity, battery_storage, consumption, price, hour1, hour2]
 running_state = [ZFilter((num_inputs-building_count,), clip=5) for _ in range(building_count)]        # no mean for price and one-hot
-running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]
+running_reward = [ZFilter((1,), demean=False, clip=10) for _ in range(building_count)]      # TODO: not used
 
 def evaluation(schema_dict_eval):
     eval_env = CityLearnEnv(schema_dict_eval)
@@ -235,7 +235,7 @@ for i_episode in count(1):
         # state = np.array([[j for j in np.hstack(encoders[i]*state[i][:-5]) if j != None] + state[i][-5:] for i in range(5)])
         reward_sum = np.array([0.] * building_count)
         for t in range(10000): # Don't infinite loop while learning
-            action = [select_action(state[b]).item() for b in range(building_count)]
+            action = [select_action(state[b]).item() for b in range(building_count)]        # TODO: parallize
             next_state, reward, done, _ = env.step(action)
             reward_sum += reward
 
