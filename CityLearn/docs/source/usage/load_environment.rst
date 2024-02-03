@@ -9,7 +9,7 @@ The :ref:`schema-page` filepath can be use to initialize an environment:
 
 .. code:: python
 
-    from citylearn.citylearn import CityLearnEnv
+    from CityLearn.citylearn.citylearn import CityLearnEnv
     
     schema_filepath = 'path/to/schema.json'
     env = CityLearnEnv(schema_filepath)
@@ -23,8 +23,8 @@ Alternatively, the schema can be supplied as a :py:obj:`dict` object. This appro
 
 .. code:: python
 
-    from citylearn.citylearn import CityLearnEnv
-    from citylearn.utilities import read_json
+    from CityLearn.citylearn.citylearn import CityLearnEnv
+    from CityLearn.citylearn.utilities import read_json
     
     schema_filepath = 'path/to/schema.json'
     schema = read_json(schema_filepath)
@@ -38,7 +38,7 @@ CityLearn provides some data files that are contained in named datasets includin
 
 .. code:: python
 
-    from citylearn.data import DataSet
+    from CityLearn.citylearn.data import DataSet
 
     dataset_names = DataSet.get_names()
     print(dataset_names)
@@ -50,7 +50,7 @@ Initialize the environment using any of the valid names:
 
 .. code:: python
 
-    from citylearn.citylearn import CityLearnEnv
+    from CityLearn.citylearn.citylearn import CityLearnEnv
     
     env = CityLearnEnv('citylearn_challenge_2020_climate_zone_1')
 
@@ -58,6 +58,6 @@ The dataset can also be download to a path of choice for inspection. The followi
 
 .. code:: python
 
-    from citylearn.data import DataSet
+    from CityLearn.citylearn.data import DataSet
 
     DataSet.copy('citylearn_challenge_2020_climate_zone_1')

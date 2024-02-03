@@ -1,8 +1,8 @@
 import inspect
 from typing import Any, List, Mapping
 from gym import spaces
-from citylearn.base import Environment
-from citylearn.preprocessing import Encoder, PeriodicNormalization, Normalize, OnehotEncoding
+from CityLearn.citylearn.base import Environment
+from CityLearn.citylearn.preprocessing import Encoder, PeriodicNormalization, Normalize, OnehotEncoding
 
 class Agent(Environment):
     def __init__(self, observation_names: List[List[str]], observation_space: List[spaces.Box], action_space: List[spaces.Box], building_information: List[Mapping[str, Any]], **kwargs):

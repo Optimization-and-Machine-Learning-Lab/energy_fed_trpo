@@ -2,10 +2,10 @@ import math
 from typing import List, Mapping, Union
 from gym import spaces
 import numpy as np
-from citylearn.base import Environment
-from citylearn.data import EnergySimulation, CarbonIntensity, Pricing, Weather
-from citylearn.my_energy_model import Battery, PV
-from citylearn.preprocessing import Encoder, PeriodicNormalization, OnehotEncoding, RemoveFeature, Normalize, NoNormalization
+from CityLearn.citylearn.base import Environment
+from CityLearn.citylearn.data import EnergySimulation, CarbonIntensity, Pricing, Weather
+from CityLearn.citylearn.my_energy_model import Battery, PV
+from CityLearn.citylearn.preprocessing import Encoder, PeriodicNormalization, OnehotEncoding, RemoveFeature, Normalize, NoNormalization
 
 
 # TODO: remove everything about price and carbon

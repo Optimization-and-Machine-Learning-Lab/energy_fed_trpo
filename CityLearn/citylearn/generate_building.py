@@ -67,7 +67,7 @@ solar_hour_sigma = 5
 data = [[0.]*12 for _ in range(365*24)]
 
 
-with open("/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/building_2.csv", "w") as f:
+with open("./CityLearn/citylearn/data/my_data/building_2.csv", "w") as f:
     writer = csv.writer(f)
     writer.writerow(header)
     for i in range(365):

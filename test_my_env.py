@@ -5,11 +5,9 @@ from TRPO.models import *
 from torch.autograd import Variable
 np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
 
-import sys
-sys.path.append('CityLearn/')
-from citylearn.gen_citylearn import CityLearnEnv
+from CityLearn.citylearn.gen_citylearn import CityLearnEnv
 
-env = CityLearnEnv('/home/yunxiang.li/FRL/CityLearn/citylearn/data/gen_data/schema.json')
+env = CityLearnEnv('./CityLearn/citylearn/data/gen_data/schema.json')
 action = [[-0.1] * 5 for i in range(24)]
 
 state = env.reset()

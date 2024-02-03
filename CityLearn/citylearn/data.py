@@ -4,7 +4,7 @@ import shutil
 from typing import Iterable, List, Union
 import numpy as np
 
-from citylearn.utilities import read_json
+from CityLearn.citylearn.utilities import read_json
 
 class DataSet:
     """CityLearn input data set and schema class."""

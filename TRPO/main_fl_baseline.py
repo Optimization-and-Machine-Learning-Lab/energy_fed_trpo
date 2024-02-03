@@ -15,9 +15,7 @@ from torch.autograd import Variable
 from trpo import trpo_step
 from utils import *
 
-import sys
-sys.path.append('../CityLearn/')
-from citylearn.my_citylearn import CityLearnEnv
+from Citylearn.citylearn.my_citylearn import CityLearnEnv
 
 building_count = 5
 
@@ -56,8 +54,8 @@ parser.add_argument('--render', action='store_true',
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema.json'
-eval_schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
+schema_filepath = './CityLearn/citylearn/data/my_data/schema.json'
+eval_schema_filepath = './CityLearn/citylearn/data/my_data/schema_eval.json'
 
 
 def select_action(state, policy_net):

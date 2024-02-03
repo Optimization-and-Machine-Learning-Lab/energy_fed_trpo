@@ -8,10 +8,10 @@ try:
 except (ModuleNotFoundError, ImportError) as e:
     raise Exception("This functionality requires you to install torch. You can install torch by : pip install torch torchvision, or for more detailed instructions please visit https://pytorch.org.")
 
-from citylearn.agents.rbc import RBC, BasicRBC, OptimizedRBC, BasicBatteryRBC
-from citylearn.agents.rlc import RLC
-from citylearn.preprocessing import Encoder, RemoveFeature
-from citylearn.rl import PolicyNetwork, ReplayBuffer, SoftQNetwork
+from CityLearn.citylearn.agents.rbc import RBC, BasicRBC, OptimizedRBC, BasicBatteryRBC
+from CityLearn.citylearn.agents.rlc import RLC
+from CityLearn.citylearn.preprocessing import Encoder, RemoveFeature
+from CityLearn.citylearn.rl import PolicyNetwork, ReplayBuffer, SoftQNetwork
 
 class SAC(RLC):
     def __init__(self, *args, **kwargs):

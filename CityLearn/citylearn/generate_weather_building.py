@@ -142,12 +142,12 @@ for b in range(5):
     building_data = np.array(building_data)
     building_data[building_data<0] = 0
 
-    with open("/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/weather_func_{}.csv".format(b+1), "w") as f:
+    with open("./CityLearn/citylearn/data/my_data/weather_func_{}.csv".format(b+1), "w") as f:
         writer = csv.writer(f)
         writer.writerow(w_header)
         writer.writerows(weather_data)
 
-    with open("/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/building_func_{}.csv".format(b+1), "w") as f:
+    with open("./CityLearn/citylearn/data/my_data/building_func_{}.csv".format(b+1), "w") as f:
         writer = csv.writer(f)
         writer.writerow(b_header)
         writer.writerows(building_data)

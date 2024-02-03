@@ -66,7 +66,7 @@ temp_day_change = 4
 hum_day_change = 12
 
 
-with open("/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/weather_5.csv", "w") as f:
+with open("./CityLearn/citylearn/data/my_data/weather_5.csv", "w") as f:
     writer = csv.writer(f)
     writer.writerow(header)
 

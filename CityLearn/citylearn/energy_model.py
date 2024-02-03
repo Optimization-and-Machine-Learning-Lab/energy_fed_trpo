@@ -1,6 +1,6 @@
 from typing import Any, Iterable, List, Union
 import numpy as np
-from citylearn.base import Environment
+from CityLearn.citylearn.base import Environment
 np.seterr(divide='ignore', invalid='ignore')
 ZERO_DIVISION_CAPACITY = 0.00001
 

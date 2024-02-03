@@ -36,7 +36,7 @@ CityLearn also allows for custom reward functions by inheriting the base :py:cla
 .. code:: python
 
    from typing import List
-   from citylearn.reward_function import RewardFunction
+   from CityLearn.citylearn.reward_function import RewardFunction
 
    class CustomReward(RewardFunction):
        def __init__(self, agent_count: int, electricity_consumption: List[float], carbon_emission: List[float], electricity_price: List[float]):

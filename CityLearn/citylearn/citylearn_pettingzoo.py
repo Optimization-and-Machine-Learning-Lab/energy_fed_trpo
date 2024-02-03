@@ -2,7 +2,7 @@ import functools
 import warnings
 from pettingzoo import ParallelEnv
 
-from citylearn.citylearn import CityLearnEnv
+from CityLearn.citylearn.citylearn import CityLearnEnv
 
 def make_citylearn_env(schema):
     """

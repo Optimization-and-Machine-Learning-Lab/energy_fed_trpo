@@ -14,18 +14,9 @@ from torch.autograd import Variable
 from trpo import trpo_step
 from utils import *
 
-import sys
-sys.path.append('./CityLearn/')
-from citylearn.gen_citylearn import CityLearnEnv
+from CityLearn.citylearn.gen_citylearn import CityLearnEnv
 
 np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
-
-wandb_record = True
-if wandb_record:
-    import wandb
-    wandb.init(project="TRPO_rl_gen")
-    wandb.run.name = "single_agent_baseline_diff"
-wandb_step = 0
 
 torch.utils.backcompat.broadcast_warning.enabled = True
 torch.utils.backcompat.keepdim_warning.enabled = True
@@ -43,26 +34,32 @@ parser.add_argument('--max-kl', type=float, default=1e-2, metavar='G',
                     help='max kl value (default: 1e-2)')
 parser.add_argument('--damping', type=float, default=1e-1, metavar='G',
                     help='damping (default: 1e-1)')
-parser.add_argument('--seed', type=int, default=543, metavar='N',
-                    help='random seed (default: 1)')
+parser.add_argument('--seed', type=int, default=1, metavar='N',
+                    help='random seed (default: 0)')
 parser.add_argument('--batch-size', type=int, default=15000, metavar='N',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                     help='interval between training status logs (default: 10)')
 parser.add_argument('--building-no', type=int, default=0,
                     help='trained building')
-parser.add_argument('--data-path', default='/home/yunxiang.li/FRL/CityLearn/citylearn/data/gen_data/', help='data schema path')
+parser.add_argument('--data-path', default='./CityLearn/citylearn/data/gen_data/', help='data schema path')
 args = parser.parse_args()
 schema_filepath = args.data_path+'schema_eval.json'
 eval_schema_filepath = args.data_path+'schema_eval.json'
+
+wandb_record = True
+if wandb_record:
+    import wandb
+    wandb.init(project="TRPO_rl_gen")
+    wandb.run.name = f"FL_ub_baseline_diff_seed_{args.seed}"
+wandb_step = 0
 
 env = CityLearnEnv(schema_filepath)
 
 num_inputs = env.observation_space[0].shape[0]
 num_actions = env.action_space[0].shape[0]
 
-# env.seed(args.seed)
-torch.manual_seed(args.seed)
+set_seed(seed=args.seed)
 
 policy_net = Policy(num_inputs, num_actions)
 value_net = Value(num_inputs)
@@ -157,11 +154,12 @@ running_reward = ZFilter((1,), demean=False, clip=10)
 def evaluation(schema_dict_eval):
     eval_env = CityLearnEnv(schema_dict_eval)
     eval_reward = 0.
+    eval_emission = 0.
 
     done = False
     state = eval_env.reset()
+    # state = [running_state[i](state[i][:-building_count]) for i in range(building_count)]
     state = running_state(state[0])
-    # state = np.hstack(encoder*state[0])
 
     while not done:
         action = select_action_eval(state).data[0].numpy()
@@ -169,14 +167,21 @@ def evaluation(schema_dict_eval):
         next_state, reward, done, _ = eval_env.step(action)
         eval_reward += reward[0]
 
+        eval_emission -= reward[0] * eval_env.buildings[0].current_carbon_intensity()
+
+        # state = [running_state[i](next_state[i][:-building_count]) for i in range(building_count)]
         state = running_state(next_state[0])
-        # state = np.hstack(encoder*next_state[0])
-    print()
 
     print('evaluate reward {:.2f}'.format(eval_reward/24))
 
     if wandb_record:
-        wandb.log({"eval_"+str(args.building_no+1): eval_reward/24}, step = int(wandb_step))
+
+        base_name = f"eval/b_{args.building_no+1}_"
+
+        wandb.log({
+            f"{base_name}reward_avg": eval_reward/24,
+            f"{base_name}emission_avg": eval_emission/24,
+        }, step = int(wandb_step))
 
 
 with open(schema_filepath) as json_file:
@@ -200,6 +205,7 @@ for i_episode in count(1):
 
     num_steps = 0
     reward_batch = 0
+    emission_batch = 0
     num_episodes = 0
     while num_steps < args.batch_size:
 
@@ -207,11 +213,15 @@ for i_episode in count(1):
         state = running_state(state)
 
         reward_sum = 0
+        emission_sum = 0
+
         for t in range(10000): # Don't infinite loop while learning
             action = select_action(state)
             action = action.data[0].numpy()
             next_state, reward, done, _ = env.step(action)
             reward_sum += reward[0]
+
+            emission_sum -= reward[0] * env.buildings[0].current_carbon_intensity()
 
             next_state = running_state(next_state[0])
 
@@ -228,6 +238,7 @@ for i_episode in count(1):
         num_steps += (t-1)
         num_episodes += 1
         reward_batch += reward_sum
+        emission_batch += emission_sum
 
     reward_batch /= num_episodes
     batch = memory.sample_batch()
@@ -236,10 +247,22 @@ for i_episode in count(1):
     wandb_step += 1
 
     if i_episode % args.log_interval == 0:
-        print('Episode {}\tLast reward: {}\tAverage reward {:.2f}'.format(
-            i_episode, reward_sum/24, reward_batch/24))
+
+        print('Episode {}\tLast reward: {}\tLast emission: {}\tAverage reward {:.2f}\tAverage emission {}'.format(
+                i_episode, reward_sum/24, emission_sum/24, reward_batch/24, emission_batch/24
+            )
+        )
+
         if wandb_record:
-            wandb.log({"train_"+str(args.building_no+1): reward_sum/24}, step = int(wandb_step))
+
+            base_name = f"train/b_{args.building_no+1}_"
+
+            wandb.log({
+                f"{base_name}reward_avg": reward_sum/24,
+                f"{base_name}reward_batch_avg": reward_batch/24,
+                f"{base_name}emission_avg": emission_sum/24,
+                f"{base_name}emission_batch_avg": emission_batch/24,
+            }, step = int(wandb_step))
     
     evaluation(schema_dict_eval)
         

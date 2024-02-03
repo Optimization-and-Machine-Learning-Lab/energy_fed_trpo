@@ -1,7 +1,7 @@
 import logging
 from typing import List
-from citylearn.citylearn import CityLearnEnv
-from citylearn.agents.base import Agent
+from CityLearn.citylearn.citylearn import CityLearnEnv
+from CityLearn.citylearn.agents.base import Agent
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger('matplotlib.font_manager').disabled = True

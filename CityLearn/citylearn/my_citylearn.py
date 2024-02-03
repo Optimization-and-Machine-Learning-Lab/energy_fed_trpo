@@ -5,12 +5,12 @@ from typing import Any, List, Mapping, Tuple, Union
 from gym import Env, spaces
 import numpy as np
 import pandas as pd
-from citylearn.my_building import Building
-from citylearn.cost_function import CostFunction
-from citylearn.data import DataSet, EnergySimulation, CarbonIntensity, Pricing, Weather
-from citylearn.my_reward_function import RewardFunction
-from citylearn.utilities import read_json
-from citylearn.rendering import get_background, RenderBuilding, get_plots
+from CityLearn.citylearn.my_building import Building
+from CityLearn.citylearn.cost_function import CostFunction
+from CityLearn.citylearn.data import DataSet, EnergySimulation, CarbonIntensity, Pricing, Weather
+from CityLearn.citylearn.my_reward_function import RewardFunction
+from CityLearn.citylearn.utilities import read_json
+from CityLearn.citylearn.rendering import get_background, RenderBuilding, get_plots
 
 class CityLearnEnv(Env):
     def __init__(self, schema: Union[str, Path, Mapping[str, Any]], **kwargs):
@@ -118,7 +118,12 @@ class CityLearnEnv(Env):
                 weather = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['weather'])).iloc[simulation_start_time_step:simulation_end_time_step + 1].copy()
                 weather = Weather(*weather.values.T)
 
-                carbon_intensity = None
+                if building_schema.get('carbon_intensity', None) is not None:
+                    carbon_intensity = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['carbon_intensity'])).iloc[simulation_start_time_step:simulation_end_time_step + 1].copy()
+                    carbon_intensity = carbon_intensity['kg_CO2/kWh'].tolist()
+                    carbon_intensity = CarbonIntensity(carbon_intensity)
+                else:
+                    carbon_intensity = None
 
                 if building_schema.get('pricing', None) is not None:
                     pricing = pd.read_csv(os.path.join(self.schema['root_directory'],building_schema['pricing'])).iloc[simulation_start_time_step:simulation_end_time_step + 1].copy()
@@ -147,7 +152,7 @@ class CityLearnEnv(Env):
                         device_type = building_schema[name]['type']
                         device_module = '.'.join(device_type.split('.')[0:-1])
                         device_name = device_type.split('.')[-1]
-                        constructor = getattr(importlib.import_module(device_module),device_name)
+                        constructor = getattr(importlib.import_module(f'CityLearn.{(device_module)}'),device_name)
                         attributes = building_schema[name].get('attributes',{})
                         attributes['seconds_per_time_step'] = seconds_per_time_step
                         device = constructor(**attributes)
@@ -165,7 +170,7 @@ class CityLearnEnv(Env):
         reward_function_attributes = {} if reward_function_attributes is None else reward_function_attributes
         reward_function_module = '.'.join(reward_function_type.split('.')[0:-1])
         reward_function_name = reward_function_type.split('.')[-1]
-        reward_function_constructor = getattr(importlib.import_module(reward_function_module), reward_function_name)
+        reward_function_constructor = getattr(importlib.import_module(f'CityLearn.{reward_function_module}'), reward_function_name)
         agent_count = len(buildings)
         reward_function = reward_function_constructor(agent_count=agent_count,**reward_function_attributes)
 

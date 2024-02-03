@@ -1,10 +1,10 @@
 import numpy as np
 
 import sys
-sys.path.append('./CityLearn/')
-from citylearn.my_citylearn import CityLearnEnv
 
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/schema_eval.json'
+from Citylearn.citylearn.my_citylearn import CityLearnEnv
+
+schema_filepath = './CityLearn/citylearn/data/my_data/schema_eval.json'
 env = CityLearnEnv(schema_filepath)
 
 

@@ -64,7 +64,7 @@ for b in range(5):
     # print(np.where(building_data<0))
     building_data[building_data<0] = 0
 
-    with open("/home/yunxiang.li/FRL/CityLearn/citylearn/data/my_data/building_simple_{}.csv".format(b+1), "w") as f:
+    with open("./CityLearn/citylearn/data/my_data/building_simple_{}.csv".format(b+1), "w") as f:
         writer = csv.writer(f)
         writer.writerow(b_header)
         writer.writerows(building_data)

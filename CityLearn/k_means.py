@@ -1,9 +1,9 @@
 import numpy as np
 from sklearn import preprocessing
 from sklearn.cluster import KMeans
-from citylearn.citylearn import CityLearnEnv
+from CityLearn.citylearn.citylearn import CityLearnEnv
 
-schema_filepath = '/home/yunxiang.li/FRL/CityLearn/citylearn/data/citylearn_challenge_2022_phase_1/schema.json'
+schema_filepath = './CityLearn/citylearn/data/citylearn_challenge_2022_phase_1/schema.json'
 env = CityLearnEnv(schema_filepath)
 
 state_record = []   # 1825 * 672

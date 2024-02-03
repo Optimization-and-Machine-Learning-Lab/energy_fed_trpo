@@ -5,10 +5,10 @@ from gym import spaces
 import numpy as np
 import pandas as pd
 import torch
-from citylearn.base import Environment
-from citylearn.data import EnergySimulation, CarbonIntensity, Pricing, Weather
-from citylearn.energy_model import Battery, ElectricHeater, HeatPump, PV, StorageTank
-from citylearn.preprocessing import Normalize, PeriodicNormalization
+from CityLearn.citylearn.base import Environment
+from CityLearn.citylearn.data import EnergySimulation, CarbonIntensity, Pricing, Weather
+from CityLearn.citylearn.energy_model import Battery, ElectricHeater, HeatPump, PV, StorageTank
+from CityLearn.citylearn.preprocessing import Normalize, PeriodicNormalization
 
 class Building(Environment):
     r"""Base class for building.

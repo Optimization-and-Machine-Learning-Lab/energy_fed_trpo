@@ -13,9 +13,9 @@ try:
 except (ModuleNotFoundError, ImportError) as e:
     raise Exception("This functionality requires you to install torch. You can install torch by : pip install torch torchvision, or for more detailed instructions please visit https://pytorch.org.")
 
-from citylearn.agents.sac import SAC
-from citylearn.preprocessing import Encoder, NoNormalization, PeriodicNormalization, RemoveFeature
-from citylearn.rl import RegressionBuffer
+from CityLearn.citylearn.agents.sac import SAC
+from CityLearn.citylearn.preprocessing import Encoder, NoNormalization, PeriodicNormalization, RemoveFeature
+from CityLearn.citylearn.rl import RegressionBuffer
 
 class MARLISA(SAC):
     __COORDINATION_VARIABLE_COUNT = 2

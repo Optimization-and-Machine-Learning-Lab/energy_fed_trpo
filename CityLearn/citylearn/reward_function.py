@@ -1,7 +1,7 @@
 from typing import List, Tuple
 import numpy as np
-from citylearn.citylearn import CityLearnEnv
-from citylearn.energy_model import ZERO_DIVISION_CAPACITY
+from CityLearn.citylearn.citylearn import CityLearnEnv
+from CityLearn.citylearn.energy_model import ZERO_DIVISION_CAPACITY
 
 class RewardFunction:
     r"""Base and default reward function class.

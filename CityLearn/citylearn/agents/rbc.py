@@ -1,5 +1,5 @@
 from typing import List
-from citylearn.agents.base import Agent
+from CityLearn.citylearn.agents.base import Agent
 
 class RBC(Agent):
     def __init__(self, *args, **kwargs):

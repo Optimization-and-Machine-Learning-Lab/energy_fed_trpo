@@ -3,10 +3,10 @@ import random
 from typing import List, Mapping, Union
 from gym import spaces
 import numpy as np
-from citylearn.base import Environment
-from citylearn.data import EnergySimulation, CarbonIntensity, Pricing, Weather
-from citylearn.gen_energy_model import Battery, PV
-from citylearn.preprocessing import Encoder, PeriodicNormalization, OnehotEncoding, RemoveFeature, Normalize, NoNormalization
+from CityLearn.citylearn.base import Environment
+from CityLearn.citylearn.data import EnergySimulation, CarbonIntensity, Pricing, Weather
+from CityLearn.citylearn.gen_energy_model import Battery, PV
+from CityLearn.citylearn.preprocessing import Encoder, PeriodicNormalization, OnehotEncoding, RemoveFeature, Normalize, NoNormalization
 
 
 # TODO: remove everything about price and carbon
@@ -16,7 +16,7 @@ class Building():
         # ac_efficiency, solar_efficiency, panel, solar_intercept, 
         schema,
         energy_simulation: EnergySimulation, weather: Weather, observation_metadata: Mapping[str, bool], action_metadata: Mapping[str, bool],
-        pricing: Pricing = None, electrical_storage: Battery = None, pv: PV = None, name: str = None, **kwargs
+        carbon_intensity: CarbonIntensity = None, pricing: Pricing = None, electrical_storage: Battery = None, pv: PV = None, name: str = None, **kwargs
     ):
         self.name = name
         self.ac_efficiency = schema["ac_efficiency"]
@@ -28,6 +28,7 @@ class Building():
 
         self.energy_simulation = energy_simulation
         self.weather = weather
+        self.carbon_intensity = carbon_intensity
         self.electrical_storage = Battery(1.0, 1.0)
         self.pv = PV(1.0)
         self.pricing = pricing
@@ -173,6 +174,22 @@ class Building():
     @property
     def net_electricity_consumption_price(self) -> List[float]:
         return self.__net_electricity_consumption_price
+
+    @property
+    def carbon_intensity(self) -> CarbonIntensity:
+        """Carbon dioxide emission rate time series."""
+
+        return self.__carbon_intensity
+
+    @carbon_intensity.setter
+    def carbon_intensity(self, carbon_intensity: CarbonIntensity):
+        if carbon_intensity is None:
+            self.__carbon_intensity = CarbonIntensity(np.zeros(len(self.energy_simulation.hour), dtype = float))
+        else:
+            self.__carbon_intensity = carbon_intensity
+
+    def current_carbon_intensity(self):
+        return self.__carbon_intensity.carbon_intensity[self.time_step]
 
     # @property
     # def observation_encoders(self) -> List[Encoder]:

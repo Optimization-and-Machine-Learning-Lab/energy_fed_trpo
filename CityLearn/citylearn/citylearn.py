@@ -8,11 +8,11 @@ from gym import Env, spaces
 import numpy as np
 import pandas as pd
 from citylearn import __version__ as citylearn_version
-from citylearn.base import Environment
-from citylearn.building import Building
-from citylearn.cost_function import CostFunction
-from citylearn.data import DataSet, EnergySimulation, CarbonIntensity, Pricing, Weather
-from citylearn.utilities import read_json
+from CityLearn.citylearn.base import Environment
+from CityLearn.citylearn.building import Building
+from CityLearn.citylearn.cost_function import CostFunction
+from CityLearn.citylearn.data import DataSet, EnergySimulation, CarbonIntensity, Pricing, Weather
+from CityLearn.citylearn.utilities import read_json
 
 LOGGER = logging.getLogger()
 logging.getLogger('matplotlib.font_manager').disabled = True

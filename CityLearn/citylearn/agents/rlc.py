@@ -7,7 +7,7 @@ try:
 except (ModuleNotFoundError, ImportError) as e:
     raise Exception("This functionality requires you to install torch. You can install torch by : pip install torch torchvision, or for more detailed instructions please visit https://pytorch.org.")
 
-from citylearn.agents.base import Agent
+from CityLearn.citylearn.agents.base import Agent
 
 class RLC(Agent):
     def __init__(

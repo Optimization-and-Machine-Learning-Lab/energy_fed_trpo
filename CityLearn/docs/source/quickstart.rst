@@ -14,8 +14,8 @@ Run the following to simulate an environment controlled by decentralized-indepen
 
 .. code:: python
 
-    from citylearn.citylearn import CityLearnEnv
-    from citylearn.agents.rbc import BasicRBC as RBCAgent
+    from CityLearn.citylearn.citylearn import CityLearnEnv
+    from CityLearn.citylearn.agents.rbc import BasicRBC as RBCAgent
 
     dataset_name = 'citylearn_challenge_2022_phase_1'
     env = CityLearnEnv(dataset_name)
@@ -42,8 +42,8 @@ Run the following to simulate an environment controlled by decentralized-indepen
 
 .. code:: python
 
-    from citylearn.citylearn import CityLearnEnv
-    from citylearn.agents.sac import SAC as SACAgent
+    from CityLearn.citylearn.citylearn import CityLearnEnv
+    from CityLearn.citylearn.agents.sac import SAC as SACAgent
 
     dataset_name = 'citylearn_challenge_2022_phase_1'
     env = CityLearnEnv(dataset_name)

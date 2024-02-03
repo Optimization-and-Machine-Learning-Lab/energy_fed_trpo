@@ -1,12 +1,12 @@
 import argparse
 from datetime import datetime
-from citylearn.__init__ import __version__
+from CityLearn.citylearn.__init__ import __version__
 import inspect
 from pathlib import Path
 import pickle
 import sys
-from citylearn.citylearn import CityLearnEnv
-from citylearn.simulator import Simulator
+from CityLearn.citylearn.citylearn import CityLearnEnv
+from CityLearn.citylearn.simulator import Simulator
 
 def simulate(schema: str, result_filepath: str = None):
     citylearn_env = CityLearnEnv(schema)
