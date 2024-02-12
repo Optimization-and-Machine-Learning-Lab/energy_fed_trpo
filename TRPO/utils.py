@@ -18,6 +18,11 @@ def set_seed(seed):
 
     return None
 
+def write_log(log_path, log):
+
+    with open(log_path + '/logs.txt', 'a') as f:
+        f.write(str(log) + '\n')
+
 def normal_entropy(std):
     var = std.pow(2)
     entropy = 0.5 + 0.5 * torch.log(2 * var * math.pi)

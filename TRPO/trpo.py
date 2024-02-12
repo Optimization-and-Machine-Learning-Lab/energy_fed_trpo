@@ -4,9 +4,9 @@ import torch
 from torch.autograd import Variable
 from utils import *
 
-
 def conjugate_gradients(Avp, b, nsteps, residual_tol=1e-10):
-    x = torch.zeros(b.size())
+    
+    x = torch.zeros(b.size()).to(b.device)
     r = b.clone()
     p = b.clone()
     rdotr = torch.dot(r, r)
@@ -31,6 +31,7 @@ def linesearch(model,
                expected_improve_rate,
                max_backtracks=10,
                accept_ratio=.1):
+    
     fval = f(True).data
     # print("fval before", fval.item())
     for (_n_backtracks, stepfrac) in enumerate(.5**np.arange(max_backtracks)):
@@ -49,6 +50,7 @@ def linesearch(model,
 
 
 def trpo_step(model, get_loss, get_kl, max_kl, damping):
+
     loss = get_loss()
     grads = torch.autograd.grad(loss, model.parameters())
     loss_grad = torch.cat([grad.view(-1) for grad in grads]).data

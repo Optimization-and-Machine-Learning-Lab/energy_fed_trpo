@@ -52,6 +52,7 @@ if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_gen")
     wandb.run.name = f"FL_baseline_diff_seed_{args.seed}"
+    wandb.run.config["train_type"] = "ind_agent"
 wandb_step = 0
 
 env = CityLearnEnv(schema_filepath)

@@ -2,3 +2,4 @@ wandb/
 __pycache__/
 banma.py
 .vscode
+logs/

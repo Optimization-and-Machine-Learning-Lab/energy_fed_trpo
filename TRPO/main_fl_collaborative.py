@@ -59,6 +59,7 @@ if wandb_record:
     import wandb
     wandb.init(project="TRPO_rl_gen")
     wandb.run.name = f"FL_diff_model_no_enc_seed_{args.seed}"
+    wandb.run.config["train_type"] = "fl"
 wandb_step = 0
 
 
@@ -264,6 +265,7 @@ for i_episode in count(1):
         emission_sum = np.array([0.] * building_count)
 
         for t in range(10000): # Don't infinite loop while learning
+            
             action = [select_action(state[b]).item() for b in range(building_count)]        # TODO: parallize
             next_state, reward, done, _ = env.step(action)
 
