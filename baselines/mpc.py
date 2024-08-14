@@ -84,7 +84,7 @@ class TRPO:
 
     def update_params(self, batch):
 
-        rewards = torch.Tensor(np.stack(batch.reward)).to(device=self.device)
+        rewards = torch.Tensor(batch.reward).to(device=self.device)
         masks = torch.Tensor(batch.mask).to(device=self.device)
         actions = torch.Tensor(np.concatenate(batch.action, 0)).unsqueeze(-1).to(device=self.device)
         states = torch.Tensor(np.array(batch.state)).to(device=self.device)
@@ -203,7 +203,7 @@ class TRPO:
                         action = [self.select_action(state[b]).detach().cpu().numpy()[0] for b in range(self.building_count)]
                         next_state, reward, done, _ = self.train_env.step(action)
 
-                        reward_sum += np.array(reward).squeeze()
+                        reward_sum += reward
                         # emission_sum += np.array(reward) * self.train_env.buildings[0].current_carbon_intensity()
 
                         if self.train_env.schema['personalization']:
