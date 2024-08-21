@@ -64,3 +64,4 @@ def get_flat_grad_from(net, grad_grad=False):
 
     flat_grad = torch.cat(grads)
     return flat_grad
+

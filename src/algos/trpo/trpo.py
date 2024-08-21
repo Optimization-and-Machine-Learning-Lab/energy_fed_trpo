@@ -2,7 +2,7 @@ import numpy as np
 
 import torch
 from torch.autograd import Variable
-from utils import *
+from src.utils.utils import *
 
 def conjugate_gradients(Avp, b, nsteps, residual_tol=1e-10):
     
