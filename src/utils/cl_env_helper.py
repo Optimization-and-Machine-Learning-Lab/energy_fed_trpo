@@ -27,12 +27,10 @@ import pandas as pd
 import seaborn as sns
 
 
-from typing import Any
 from citylearn.data import DataSet
 from matplotlib import pyplot as plt
 from matplotlib import ticker as ticker
 from citylearn.citylearn import CityLearnEnv
-from citylearn.reward_function import RewardFunction
 
 def select_buildings(
     dataset_name: str, count: int, seed: int, buildings_to_exclude: list[str] = None,
@@ -150,68 +148,6 @@ def select_simulation_period(
     simulation_end_time_step = simulation_start_time_step + 24*count - 1
 
     return simulation_start_time_step, simulation_end_time_step
-
-class CustomReward(RewardFunction):
-
-    def __init__(self, env_metadata: dict[str, Any]):
-        r"""Initialize CustomReward.
-
-        Parameters
-        ----------
-        env_metadata: dict[str, Any]:
-            General static information about the environment.
-        """
-
-        super().__init__(env_metadata)
-
-    def calculate(
-        self, observations: list[dict[str, int, float]]
-    ) -> list[float]:
-        
-        r"""Returns reward for most recent action.
-
-        The reward is designed to minimize electricity cost.
-        It is calculated for each building, i and summed to provide the agent
-        with a reward that is representative of all n buildings.
-        It encourages net-zero energy use by penalizing grid load satisfaction
-        when there is energy in the battery as well as penalizing
-        net export when the battery is not fully charged through the penalty
-        term. There is neither penalty nor reward when the battery
-        is fully charged during net export to the grid. Whereas, when the
-        battery is charged to capacity and there is net import from the
-        grid the penalty is maximized.
-
-        Parameters
-        ----------
-        observations: list[dict[str, int | float]]
-            List of all building observations at current
-            :py:attr:`citylearn.citylearn.CityLearnEnv.time_step`
-            that are got from calling
-            :py:meth:`citylearn.building.Building.observations`.
-
-        Returns
-        -------
-        reward: list[float]
-            Reward for transition to current timestep.
-        """
-
-        reward_list = []
-
-        for o, m in zip(observations, self.env_metadata['buildings']):
-
-            cost = o['net_electricity_consumption'] * o['electricity_pricing']
-            battery_soc = o['electrical_storage_soc']
-            penalty = -(1.0 + np.sign(cost)*battery_soc)
-            reward = penalty*abs(cost)
-
-            # reward_list.append(reward)
-            # battery_soc = o['electrical_storage_soc']
-            # penalty = -(1.0 + np.sign(cost)*battery_soc)
-            # reward = penalty*abs(cost)
-
-            reward_list.append(reward)
-
-        return reward_list
     
 def get_kpis(env: CityLearnEnv) -> pd.DataFrame:
 

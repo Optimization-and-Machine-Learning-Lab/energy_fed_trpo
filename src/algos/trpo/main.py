@@ -13,10 +13,11 @@ from citylearn.citylearn import CityLearnEnv
 
 from trpo import *
 from models import *
+from rewards import *
 from src.utils.utils import *
-from src.utils.cl_env_helper import *
 from replay_memory import Memory
 from running_state import ZFilter
+from src.utils.cl_env_helper import *
 
 class TRPO:
 
@@ -66,9 +67,11 @@ class TRPO:
         # state: [onehot?, temperature, humidity, battery_storage, consumption, price, hour1, hour2]
 
         if personalization:
-            self.running_state = [ZFilter((self.num_inputs-self.building_count,), clip=5) for _ in range(self.building_count)]
+            self.train_running_state = [ZFilter((self.num_inputs-self.building_count,), clip=5) for _ in range(self.building_count)]
+            self.eval_running_state = [ZFilter((self.num_inputs-self.building_count,), clip=5) for _ in range(self.building_count)]
         else:
-            self.running_state = [ZFilter((self.num_inputs,), clip=5) for _ in range(self.building_count)]
+            self.train_running_state = [ZFilter((self.num_inputs,), clip=5) for _ in range(self.building_count)]
+            self.eval_running_state = [ZFilter((self.num_inputs,), clip=5) for _ in range(self.building_count)]
 
         # Properties
             
@@ -191,7 +194,7 @@ class TRPO:
                     # Add encoding if enabled
 
                     if self.personalization:
-                        state = [np.concatenate((state[i][:self.building_count], self.running_state[i](state[i][self.building_count:]))) for i in range(self.building_count)]
+                        state = [np.concatenate((state[i][:self.building_count], self.train_running_state[i](state[i][self.building_count:]))) for i in range(self.building_count)]
 
                     done = False
 
@@ -201,14 +204,19 @@ class TRPO:
                         next_state, reward, done, _, _ = self.train_env.step(action)
 
                         if self.personalization:
-                            next_state = [np.concatenate((next_state[i][:self.building_count], self.running_state[i](next_state[i][self.building_count:]))) for i in range(self.building_count)]
+                            next_state = [np.concatenate((next_state[i][:self.building_count], self.train_running_state[i](next_state[i][self.building_count:]))) for i in range(self.building_count)]
                         else:    
-                            next_state = [self.running_state[i](next_state[i]) for i in range(self.building_count)]
+                            next_state = [self.train_running_state[i](next_state[i]) for i in range(self.building_count)]
 
                         mask = 0 if done else 1
 
                         for b in range(self.building_count):
-                            memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b])
+
+                            # Add a penalization for trying to use more energy than what's available in the battery
+
+                            storage_pen = (action[b] - self.train_env.buildings[b].electrical_storage.electricity_consumption[-1]) ** 2
+
+                            memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b] - storage_pen)
 
                         state = next_state
                         num_steps += 1
@@ -217,20 +225,16 @@ class TRPO:
 
                     if kpis is None:
 
-                        kpis = get_kpis(self.train_env)
+                        kpis = get_kpis(self.train_env).reset_index()
                         kpi_count += 1
 
                     else:
 
                         new_kpis = get_kpis(self.train_env)
 
-                        # Average with previous kpis using concat
+                        # Update kpis
 
-                        acc_kpis = pd.concat((kpis, new_kpis)).groupby(level=0).sum()
-
-                        # Update kpis using index
-
-                        kpis['value'] = acc_kpis.loc[kpis.index]
+                        kpis = pd.concat((kpis, new_kpis)).groupby(['kpi', 'name', 'level'], as_index=False).sum()
 
                         kpi_count += 1
 
@@ -263,9 +267,11 @@ class TRPO:
 
                     base_name = f"train/b_{b+1}_"
 
+                    # Searching by index works as after grouping the District metric goes last
+
                     train_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-                    train_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b + 1] / kpi_count
-                    train_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b + 1] / kpi_count
+                    train_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b] / kpi_count
+                    train_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b] / kpi_count
 
                 batch = self.transition(*zip(*batch))
                 self.update_params(batch)
@@ -293,17 +299,17 @@ class TRPO:
         # Add encoding if enabled
 
         if self.personalization:
-            state = [np.concatenate((state[i][:self.building_count], self.running_state[i](state[i][self.building_count:]))) for i in range(self.building_count)]
+            state = [np.concatenate((state[i][:self.building_count], self.eval_running_state[i](state[i][self.building_count:]))) for i in range(self.building_count)]
 
         while not done:
 
             action = [self.select_action(state[b], eval=True).detach().cpu().numpy() for b in range(self.building_count)]
-            next_state, _, done, _, _ = eval_env.step(action)
+            next_state, _, done, _, _ = self.eval_env.step(action)
 
             if self.personalization:
-                state = [np.concatenate((next_state[i][:self.building_count], self.running_state[i](next_state[i][self.building_count:]))) for i in range(self.building_count)]
+                state = [np.concatenate((next_state[i][:self.building_count], self.eval_running_state[i](next_state[i][self.building_count:]))) for i in range(self.building_count)]
             else:
-                state = [self.running_state[i](next_state[i]) for i in range(self.building_count)]
+                state = [self.eval_running_state[i](next_state[i]) for i in range(self.building_count)]
         
         # Logging
 
@@ -444,7 +450,7 @@ if __name__ == "__main__":
 
     DATASET_NAME = 'citylearn_challenge_2022_phase_all'
     BUILDING_COUNT = 2
-    DAY_COUNT = 7
+    DAY_COUNT = 1
     
     ACTIVE_OBSERVATIONS = [
         'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
@@ -466,7 +472,8 @@ if __name__ == "__main__":
         active_observations=ACTIVE_OBSERVATIONS,
         simulation_start_time_step=simulation_start_time_step,
         simulation_end_time_step=simulation_end_time_step,
-        reward_function=CustomReward
+        # reward_function=ElectricityCostWithPenalization
+        reward_function=NetElectricity
     )
 
     # train_env = NormalizedObservationWrapper(train_env)
@@ -484,7 +491,8 @@ if __name__ == "__main__":
         active_observations=ACTIVE_OBSERVATIONS,
         simulation_start_time_step=simulation_start_time_step,
         simulation_end_time_step=simulation_end_time_step,
-        reward_function=CustomReward
+        # reward_function=ElectricityCostWithPenalization
+        reward_function=NetElectricity
     )
 
     # eval_env = NormalizedObservationWrapper(eval_env)
