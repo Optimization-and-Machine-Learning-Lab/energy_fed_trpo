@@ -28,12 +28,18 @@ def normal_entropy(std):
     entropy = 0.5 + 0.5 * torch.log(2 * var * math.pi)
     return entropy.sum(1, keepdim=True)
 
-
 def normal_log_density(x, mean, log_std, std):
-    var = std.pow(2)
-    log_density = -(x - mean).pow(2) / (
-        2 * var) - 0.5 * math.log(2 * math.pi) - log_std
-    return log_density.sum(1, keepdim=True)
+    # Precompute constants
+    log2pi = math.log(2 * math.pi)
+    
+    # Square the std instead of calling pow(2)
+    var = std * std
+    
+    # Vectorized and in-place operations
+    log_density = -(x - mean).pow(2) / (2 * var) - 0.5 * log2pi - log_std
+    
+    # Return the sum along dimension 1, keeping dimension
+    return log_density.sum(dim=1, keepdim=True)
 
 
 def get_flat_params_from(model):

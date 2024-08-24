@@ -13,10 +13,10 @@ from citylearn.citylearn import CityLearnEnv
 
 from trpo import *
 from models import *
-from rewards import *
 from src.utils.utils import *
 from replay_memory import Memory
 from running_state import ZFilter
+from src.utils.cl_rewards import *
 from src.utils.cl_env_helper import *
 
 class TRPO:
@@ -181,10 +181,6 @@ class TRPO:
             for i_episode in range(num_episodes):
 
                 num_steps = 0
-                kpi_count = 0
-
-                kpis = None
-
                 memories = [Memory() for _ in range(self.building_count)]
 
                 while num_steps < self.batch_size:
@@ -221,71 +217,62 @@ class TRPO:
                         state = next_state
                         num_steps += 1
 
-                    # Accumulate kpis
+                num_episodes += 1
+                
+                # Perform TRPO update
 
-                    if kpis is None:
-
-                        kpis = get_kpis(self.train_env).reset_index()
-                        kpi_count += 1
-
-                    else:
-
-                        new_kpis = get_kpis(self.train_env)
-
-                        # Update kpis
-
-                        kpis = pd.concat((kpis, new_kpis)).groupby(['kpi', 'name', 'level'], as_index=False).sum()
-
-                        kpi_count += 1
-
-                    num_episodes += 1
-
-                # Train 
-
-                train_log = {}
                 batch = []
-
-                rewards = np.array(pd.DataFrame(self.train_env.unwrapped.episode_rewards)['sum'].tolist())
-
-                wandb_step += 1     # count training step
-
-                #District level logging
-
-                train_log["train/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0] / kpi_count
-                train_log["train/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0] / kpi_count
-                train_log["train/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0] / kpi_count
-                train_log["train/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0] / kpi_count
-                train_log["train/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0] / kpi_count
-
-                # Building level sampling and logging
 
                 for b in range(self.building_count):
 
                     batch += memories[b].sample()
 
-                    # For logging
-
-                    base_name = f"train/b_{b+1}_"
-
-                    # Searching by index works as after grouping the District metric goes last
-
-                    train_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-                    train_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b] / kpi_count
-                    train_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b] / kpi_count
-
                 batch = self.transition(*zip(*batch))
-                self.update_params(batch)
+                self.update_params(batch)                
 
-                eval_log = self.evaluation()
+                rewards = np.array(pd.DataFrame(self.train_env.unwrapped.episode_rewards)['sum'].tolist())
 
                 if i_episode % self.log_interval == 0:
 
-                    write_log(log_path=self.logs_path, log={'Episode': i_episode, **train_log, **eval_log})                    
-                    pbar.set_postfix({'Episode': i_episode, **train_log, **eval_log})
+                    # Logging for current episode
+                    
+                    kpis = get_kpis(self.train_env).reset_index()
+                    
+                    train_log = {}
 
-                    if self.wandb_log:
 
-                        wandb.log({**train_log, **eval_log}, step = int(wandb_step))
+                    wandb_step += 1     # count training step
+
+                    #District level logging
+
+                    train_log["train/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
+                    train_log["train/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
+                    train_log["train/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
+                    train_log["train/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
+                    train_log["train/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
+
+                    # Building level sampling and logging
+
+                    for b in range(self.building_count):
+
+                        # For logging
+
+                        base_name = f"train/b_{b+1}_"
+
+                        # Searching by index works as after grouping the District metric goes last
+
+                        train_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
+                        train_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
+                        train_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
+
+                        eval_log = self.evaluation()
+
+                        write_log(log_path=self.logs_path, log={'Episode': i_episode, **train_log, **eval_log})                    
+                        pbar.set_postfix({'Episode': i_episode, **train_log, **eval_log})
+
+                        if self.wandb_log:
+
+                            wandb.log({**train_log, **eval_log}, step = int(wandb_step))
 
                 # Update pbar
 
@@ -389,7 +376,7 @@ def parse_args():
     parser.add_argument('--l2-reg', type=float, default=1e-3, metavar='L2', help='L2 regularization regression (default: 1e-3)')
     parser.add_argument('--max-kl', type=float, default=1e-2, metavar='Max_KL', help='Max kl value (default: 1e-2)')
     parser.add_argument('--damping', type=float, default=1e-1, metavar='D', help='Damping (default: 1e-1)')
-    parser.add_argument('--seed', type=int, default=1, metavar='S', help='Random seed (default: 0)')
+    parser.add_argument('--seed', type=int, default=0, metavar='S', help='Random seed (default: 0)')
     parser.add_argument('--batch-size', type=int, default=15000, metavar='BS', help='Batch size (default: 15000)')
     parser.add_argument('--log-interval', type=int, default=1, metavar='LI', help='Interval between training status logs (default: 1)')
     parser.add_argument('--training-type', type=str, default='individual', choices={'individual', 'upperbound', 'fl', 'fl-personalized'}, help='Training type (default: individual)')
@@ -397,6 +384,7 @@ def parse_args():
     parser.add_argument('--wandb-log', default=False, action='store_true', help='Log to wandb (default: True)')
     parser.add_argument('--data-path', type=str, default='./data/schemas/warmup/', help='data schema path')
     parser.add_argument('--device', type=str, default=None, help='device (default: None)')
+    parser.add_argument('--n_episodes', type=int, default=1500, help='Number of episodes (default: 1500)')
 
     args = parser.parse_args()
 
@@ -472,11 +460,8 @@ if __name__ == "__main__":
         active_observations=ACTIVE_OBSERVATIONS,
         simulation_start_time_step=simulation_start_time_step,
         simulation_end_time_step=simulation_end_time_step,
-        # reward_function=ElectricityCostWithPenalization
         reward_function=NetElectricity
     )
-
-    # train_env = NormalizedObservationWrapper(train_env)
 
     # select buildings
     buildings = select_buildings(DATASET_NAME, BUILDING_COUNT, 1)  # Fix seed to maintain building selection among different seeds for the models
@@ -491,11 +476,8 @@ if __name__ == "__main__":
         active_observations=ACTIVE_OBSERVATIONS,
         simulation_start_time_step=simulation_start_time_step,
         simulation_end_time_step=simulation_end_time_step,
-        # reward_function=ElectricityCostWithPenalization
         reward_function=NetElectricity
     )
-
-    # eval_env = NormalizedObservationWrapper(eval_env)
 
     # TRPO initialization
 
@@ -503,7 +485,7 @@ if __name__ == "__main__":
 
     # Training
 
-    trpo.train()
+    trpo.train(num_episodes=args.n_episodes)
 
     # Save checkpoint
 
