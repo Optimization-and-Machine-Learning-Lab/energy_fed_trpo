@@ -24,7 +24,6 @@ class Policy(nn.Module):
         
         else:
             self.affine1 = nn.Linear(num_inputs, 64)
-            # self.affine2 = nn.Linear(64, 64)
             self.affine2 = nn.Linear(64, 256)
             self.affine3 = nn.Linear(256, 64)
 
@@ -40,16 +39,21 @@ class Policy(nn.Module):
 
     def forward(self, x):
         if self.one_hot:
+
+            if x.dim() == 1:
+
+                x = x.unsqueeze(dim=0)
+
             one_hot_demand = torch.tanh(self.one_hot_demand_fc(x[:, :self.one_hot_dim]))
             one_hot_solar = torch.tanh(self.one_hot_solar_fc(x[:, :self.one_hot_dim]))
-            temp_hum = torch.tanh(self.temp_hum_fc_1(x[:, self.one_hot_dim:self.one_hot_dim+2]))
+            temp_hum = torch.tanh(self.temp_hum_fc_1(x[:, self.one_hot_dim + 2:self.one_hot_dim + 4]))
             temp_hum = torch.tanh(self.temp_hum_fc_2(temp_hum))
-            other = torch.tanh(self.other_fc(x[:, -5:]))
+            other = torch.tanh(self.other_fc(torch.hstack((x[:, self.one_hot_dim : self.one_hot_dim + 2], x[:, -3:]))))
 
-            demand = torch.tanh(self.demand_fc(torch.cat((temp_hum, one_hot_demand), 1)))
-            solar = torch.tanh(self.solar_fc(torch.cat((temp_hum, one_hot_solar), 1)))
+            demand = torch.tanh(self.demand_fc(torch.cat((temp_hum, one_hot_demand), dim=1)))
+            solar = torch.tanh(self.solar_fc(torch.cat((temp_hum, one_hot_solar), dim=1)))
 
-            x = torch.tanh(self.fc(torch.cat((demand, solar, other), 1)))
+            x = torch.tanh(self.fc(torch.cat((demand, solar, other), dim=1)))
 
         else:
             x = torch.tanh(self.affine1(x))

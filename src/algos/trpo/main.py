@@ -10,6 +10,7 @@ from pathlib import Path
 from collections import namedtuple
 from torch.autograd import Variable
 from citylearn.citylearn import CityLearnEnv
+from citylearn.preprocessing import OnehotEncoding
 
 from trpo import *
 from models import *
@@ -51,6 +52,8 @@ class TRPO:
         if personalization:
 
             self.num_inputs += self.building_count
+
+        self.encoder = OnehotEncoding(list(range(self.building_count)))
 
         # Initialize networks
 
@@ -190,7 +193,7 @@ class TRPO:
                     # Add encoding if enabled
 
                     if self.personalization:
-                        state = [np.concatenate((state[i][:self.building_count], self.train_running_state[i](state[i][self.building_count:]))) for i in range(self.building_count)]
+                        state = [np.concatenate((self.encoder*i, self.train_running_state[i](state[i]))) for i in range(self.building_count)]
 
                     done = False
 
@@ -200,7 +203,7 @@ class TRPO:
                         next_state, reward, done, _, _ = self.train_env.step(action)
 
                         if self.personalization:
-                            next_state = [np.concatenate((next_state[i][:self.building_count], self.train_running_state[i](next_state[i][self.building_count:]))) for i in range(self.building_count)]
+                            next_state = [np.concatenate((self.encoder*i, self.train_running_state[i](next_state[i]))) for i in range(self.building_count)]
                         else:    
                             next_state = [self.train_running_state[i](next_state[i]) for i in range(self.building_count)]
 
@@ -286,7 +289,7 @@ class TRPO:
         # Add encoding if enabled
 
         if self.personalization:
-            state = [np.concatenate((state[i][:self.building_count], self.eval_running_state[i](state[i][self.building_count:]))) for i in range(self.building_count)]
+            state = [np.concatenate((self.encoder*i, self.train_running_state[i](state[i]))) for i in range(self.building_count)]
 
         while not done:
 
@@ -294,7 +297,7 @@ class TRPO:
             next_state, _, done, _, _ = self.eval_env.step(action)
 
             if self.personalization:
-                state = [np.concatenate((next_state[i][:self.building_count], self.eval_running_state[i](next_state[i][self.building_count:]))) for i in range(self.building_count)]
+                state = [np.concatenate((self.encoder*i, self.train_running_state[i](next_state[i]))) for i in range(self.building_count)]
             else:
                 state = [self.eval_running_state[i](next_state[i]) for i in range(self.building_count)]
         
@@ -481,7 +484,9 @@ if __name__ == "__main__":
 
     # TRPO initialization
 
-    trpo = TRPO(train_env, eval_env, device, args.gamma, args.tau, args.l2_reg, args.max_kl, args.damping, args.seed, args.batch_size, args.log_interval, args.wandb_log)
+    personalization = args.training_type == 'fl-personalized'
+
+    trpo = TRPO(train_env, eval_env, device, args.gamma, args.tau, args.l2_reg, args.max_kl, args.damping, args.seed, args.batch_size, args.log_interval, args.wandb_log, personalization)
 
     # Training
 
