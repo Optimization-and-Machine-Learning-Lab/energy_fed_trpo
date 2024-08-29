@@ -20,12 +20,17 @@ from src.utils.cl_rewards import *
 from src.algos.trpo.models import *
 from src.utils.cl_env_helper import *
 
+ACTIVE_OBSERVATIONS = [
+    'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
+    'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
+]
+
 class TRPO:
 
     def __init__(
         self, train_env : CityLearnEnv, eval_env : CityLearnEnv, device='cpu', gamma : float = 0.995, tau : float = 0.97, l2_reg : float = 1e-3, 
         max_kl : float = 1e-2, damping : float = 1e-1, seed : int = 1, batch_size : int = 15000, log_interval : int = 1, wandb_log : bool = False,
-        personalization : bool = False
+        training_type : dict = 'fl'
     ):
 
         self.device = device
@@ -41,7 +46,7 @@ class TRPO:
         self.batch_size = batch_size
         self.log_interval = log_interval
         self.wandb_log = wandb_log
-        self.personalization = personalization
+        self.personalization = training_type == 'fl-personalized'
 
         # Extract environments characteristics
 
@@ -49,7 +54,7 @@ class TRPO:
         self.num_actions = train_env.action_space[0].shape[0]
         self.building_count = len(train_env.buildings)
 
-        if personalization:
+        if self.personalization:
 
             self.num_inputs += self.building_count # We add extra length for the one-hot encoding of buildings
 
@@ -59,10 +64,10 @@ class TRPO:
         # Initialize networks
 
         self.policy_net = Policy(
-            num_inputs=self.num_inputs, num_outputs=self.num_actions, one_hot=personalization, one_hot_dim=self.building_count
+            num_inputs=self.num_inputs, num_outputs=self.num_actions, one_hot=self.personalization, one_hot_dim=self.building_count
         ).to(device=self.device)
         self.value_net = Value(
-            num_inputs=self.num_inputs, one_hot=personalization, one_hot_dim=self.building_count
+            num_inputs=self.num_inputs, one_hot=self.personalization, one_hot_dim=self.building_count
         ).to(device=self.device)
 
         # Define a path to create logs
@@ -74,7 +79,7 @@ class TRPO:
 
         # state: ['hour', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity', 'carbon_intensity', 'non_shiftable_load', 'electrical_storage_soc', 'electricity_pricing']
 
-        if personalization:
+        if self.personalization:
             self.train_running_state = [ZFilter((self.num_inputs - self.building_count - 2,), clip = 5) for _ in range(self.building_count)]
             self.eval_running_state = [ZFilter((self.num_inputs - self.building_count - 2,), clip = 5) for _ in range(self.building_count)]
         else:
@@ -180,16 +185,23 @@ class TRPO:
 
         trpo_step(self.policy_net, get_loss, get_kl, self.max_kl, self.damping)
 
-    def train(self, num_episodes : int = 1500):
+    def train(self, num_episodes : int = 1500, pre_training_episodes : int = 0):
 
         wandb_step = 0
+        pre_training_idx = 0
 
-        with tqdm(total=num_episodes, nrows=10) as pbar:
+        total_episodes = pre_training_episodes + num_episodes
+
+        with tqdm(total = total_episodes, nrows=10) as pbar:
 
             for i_episode in range(num_episodes):
 
                 num_steps = 0
                 memories = [Memory() for _ in range(self.building_count)]
+
+                # Increment the pre-training index when num_episodes // self.building_count timesteps passed
+                
+                pre_training_idx = i_episode // (pre_training_episodes // self.building_count)
 
                 while num_steps < self.batch_size:
 
@@ -248,6 +260,10 @@ class TRPO:
                 batch = []
 
                 for b in range(self.building_count):
+                    
+                    if pre_training_episodes != 0 and pre_training_idx != b and i_episode < pre_training_episodes: # If in pre-training mode, only train one building at a time
+
+                        continue
 
                     batch += memories[b].sample()
 
@@ -263,7 +279,6 @@ class TRPO:
                     kpis = get_kpis(self.train_env).reset_index()
                     
                     train_log = {}
-
 
                     wandb_step += 1     # count training step
 
@@ -420,11 +435,15 @@ def parse_args():
     parser.add_argument('--batch-size', type=int, default=15000, metavar='BS', help='Batch size (default: 15000)')
     parser.add_argument('--log-interval', type=int, default=1, metavar='LI', help='Interval between training status logs (default: 1)')
     parser.add_argument('--training-type', type=str, default='individual', choices={'individual', 'upperbound', 'fl', 'fl-personalized'}, help='Training type (default: individual)')
-    parser.add_argument('--building-no', type=int, default=0, help='Trained building (if individual building training)')
+    parser.add_argument('--pre_training_steps', type=int, default=0, help='Number of pre-training steps (default: 0)')
     parser.add_argument('--wandb-log', default=False, action='store_true', help='Log to wandb (default: True)')
     parser.add_argument('--data-path', type=str, default='./data/schemas/warmup/', help='data schema path')
     parser.add_argument('--device', type=str, default=None, help='device (default: None)')
     parser.add_argument('--n_episodes', type=int, default=1500, help='Number of episodes (default: 1500)')
+    parser.add_argument('--dataset', type=str, default='citylearn_challenge_2022_phase_all', help='Dataset name (default: citylearn_challenge_2022_phase_all)')
+    parser.add_argument('--day-count', type=int, default=1, help='Number of days for training (default: 1)')
+    parser.add_argument('--n_buildings', type=int, default=1, help='Number of buildings to train (default: 1)')
+    parser.add_argument('--building_id', type=int, default=1, help='Trained building (if individual building training)')
 
     args = parser.parse_args()
 
@@ -476,25 +495,25 @@ if __name__ == "__main__":
 
     # Configure Environment
 
-    DATASET_NAME = 'citylearn_challenge_2022_phase_all'
-    BUILDING_COUNT = 2
-    DAY_COUNT = 1
-    
-    ACTIVE_OBSERVATIONS = [
-        'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
-        'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
-    ]
+    if args.training_type != 'individual':
 
-    # select buildings
-    buildings = select_buildings(DATASET_NAME, BUILDING_COUNT, 0) # Fix seed to maintain building selection among different seeds for the models
+        # select buildings
+        buildings = select_buildings(args.dataset, args.n_buildings, 0) # Fix seed to maintain building selection among different seeds for the models
+
+    else:
+
+        # select buildings
+        buildings = [f'Building_{args.building_id}']
+
+        print(f"Individual Training for building {buildings[0]}")
 
     # select days
-    simulation_start_time_step, simulation_end_time_step = select_simulation_period(DATASET_NAME, DAY_COUNT, 0) # Fix seed to maintain simulation period among different seeds for the models
+    simulation_start_time_step, simulation_end_time_step = select_simulation_period(args.dataset, args.day_count, 0) # Fix seed to maintain simulation period among different seeds for the models
 
     # initialize environment
 
     train_env = CityLearnEnv(
-        DATASET_NAME,
+        args.dataset,
         central_agent=False,
         buildings=buildings,
         active_observations=ACTIVE_OBSERVATIONS,
@@ -505,10 +524,10 @@ if __name__ == "__main__":
 
     # select days for evaluation
 
-    simulation_start_time_step, simulation_end_time_step = select_simulation_period(DATASET_NAME, DAY_COUNT, 1) # Fix seed to maintain simulation period among different seeds for the models
+    simulation_start_time_step, simulation_end_time_step = select_simulation_period(args.dataset, args.day_count, 1) # Fix seed to maintain simulation period among different seeds for the models
 
     eval_env = CityLearnEnv(
-        DATASET_NAME,
+        args.dataset,
         central_agent=False,
         buildings=buildings,
         active_observations=ACTIVE_OBSERVATIONS,
@@ -519,13 +538,14 @@ if __name__ == "__main__":
 
     # TRPO initialization
 
-    personalization = args.training_type == 'fl-personalized'
-
-    trpo = TRPO(train_env, eval_env, device, args.gamma, args.tau, args.l2_reg, args.max_kl, args.damping, args.seed, args.batch_size, args.log_interval, args.wandb_log, personalization)
+    trpo = TRPO(
+        train_env, eval_env, device, args.gamma, args.tau, args.l2_reg, args.max_kl, args.damping, args.seed, args.batch_size,
+        args.log_interval, args.wandb_log, args.training_type
+    )
 
     # Training
 
-    trpo.train(num_episodes=args.n_episodes)
+    trpo.train(num_episodes=args.n_episodes, pre_training_episodes=args.pre_training_steps)
 
     # Save checkpoint
 
