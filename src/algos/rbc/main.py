@@ -7,7 +7,6 @@ from pathlib import Path
 from citylearn.citylearn import CityLearnEnv
 
 from src.utils.utils import *
-from stable_baselines3 import SAC
 from src.utils.cl_rewards import *
 from src.utils.cl_env_helper import *
 

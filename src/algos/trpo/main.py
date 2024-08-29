@@ -10,14 +10,14 @@ from pathlib import Path
 from collections import namedtuple
 from torch.autograd import Variable
 from citylearn.citylearn import CityLearnEnv
-from citylearn.preprocessing import OnehotEncoding
+from citylearn.preprocessing import OnehotEncoding, PeriodicNormalization
 
-from trpo import *
-from models import *
 from src.utils.utils import *
 from replay_memory import Memory
 from running_state import ZFilter
+from src.algos.trpo.trpo import *
 from src.utils.cl_rewards import *
+from src.algos.trpo.models import *
 from src.utils.cl_env_helper import *
 
 class TRPO:
@@ -45,36 +45,41 @@ class TRPO:
 
         # Extract environments characteristics
 
-        self.num_inputs = train_env.observation_space[0].shape[0]
+        self.num_inputs = train_env.observation_space[0].shape[0] + 1 # We add one extra input from the time encoding (periodic)
         self.num_actions = train_env.action_space[0].shape[0]
         self.building_count = len(train_env.buildings)
 
         if personalization:
 
-            self.num_inputs += self.building_count
+            self.num_inputs += self.building_count # We add extra length for the one-hot encoding of buildings
 
         self.encoder = OnehotEncoding(list(range(self.building_count)))
+        self.periodic_encoder = PeriodicNormalization(x_max=24)
 
         # Initialize networks
 
-        self.policy_net = Policy(num_inputs=self.num_inputs, num_outputs=self.num_actions).to(device=self.device)
-        self.value_net = Value(num_inputs=self.num_inputs).to(device=self.device)
+        self.policy_net = Policy(
+            num_inputs=self.num_inputs, num_outputs=self.num_actions, one_hot=personalization, one_hot_dim=self.building_count
+        ).to(device=self.device)
+        self.value_net = Value(
+            num_inputs=self.num_inputs, one_hot=personalization, one_hot_dim=self.building_count
+        ).to(device=self.device)
 
         # Define a path to create logs
 
         self.logs_path = wandb.run.dir if self.wandb_log else f"./logs/trpo_seed_{self.seed}_n_inputs_{self.num_inputs}_t_{str(int(time()))}"
         Path(self.logs_path).mkdir(exist_ok=True)
 
-        # Define running state
+        # Define running states
 
-        # state: [onehot?, temperature, humidity, battery_storage, consumption, price, hour1, hour2]
+        # state: ['hour', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity', 'carbon_intensity', 'non_shiftable_load', 'electrical_storage_soc', 'electricity_pricing']
 
         if personalization:
-            self.train_running_state = [ZFilter((self.num_inputs-self.building_count,), clip=5) for _ in range(self.building_count)]
-            self.eval_running_state = [ZFilter((self.num_inputs-self.building_count,), clip=5) for _ in range(self.building_count)]
+            self.train_running_state = [ZFilter((self.num_inputs - self.building_count - 2,), clip = 5) for _ in range(self.building_count)]
+            self.eval_running_state = [ZFilter((self.num_inputs - self.building_count - 2,), clip = 5) for _ in range(self.building_count)]
         else:
-            self.train_running_state = [ZFilter((self.num_inputs,), clip=5) for _ in range(self.building_count)]
-            self.eval_running_state = [ZFilter((self.num_inputs,), clip=5) for _ in range(self.building_count)]
+            self.train_running_state = [ZFilter((self.num_inputs - 1,), clip = 5) for _ in range(self.building_count)]
+            self.eval_running_state = [ZFilter((self.num_inputs - 1,), clip = 5) for _ in range(self.building_count)]
 
         # Properties
             
@@ -193,7 +198,16 @@ class TRPO:
                     # Add encoding if enabled
 
                     if self.personalization:
-                        state = [np.concatenate((self.encoder*i, self.train_running_state[i](state[i]))) for i in range(self.building_count)]
+                        state = [np.concatenate((
+                            self.encoder * i,
+                            self.periodic_encoder*state[i][0],
+                            self.train_running_state[i](state[i][1:])
+                        )) for i in range(self.building_count)]
+                    else:
+                        state = [np.concatenate((
+                            self.periodic_encoder*state[i][0],
+                            self.train_running_state[i](state[i][1:])
+                        )) for i in range(self.building_count)]
 
                     done = False
 
@@ -203,9 +217,16 @@ class TRPO:
                         next_state, reward, done, _, _ = self.train_env.step(action)
 
                         if self.personalization:
-                            next_state = [np.concatenate((self.encoder*i, self.train_running_state[i](next_state[i]))) for i in range(self.building_count)]
+                            next_state = [np.concatenate((
+                                self.encoder * i,
+                                self.periodic_encoder * next_state[i][0],
+                                self.train_running_state[i](next_state[i][1:])
+                            )) for i in range(self.building_count)]
                         else:    
-                            next_state = [self.train_running_state[i](next_state[i]) for i in range(self.building_count)]
+                            next_state = [np.concatenate((
+                                self.periodic_encoder * next_state[i][0],
+                                self.train_running_state[i](next_state[i][1:])
+                            )) for i in range(self.building_count)]
 
                         mask = 0 if done else 1
 
@@ -289,7 +310,11 @@ class TRPO:
         # Add encoding if enabled
 
         if self.personalization:
-            state = [np.concatenate((self.encoder*i, self.train_running_state[i](state[i]))) for i in range(self.building_count)]
+            state = [np.concatenate((
+                self.encoder * i,
+                self.periodic_encoder * state[i][0],
+                self.train_running_state[i](state[i][1:])
+            )) for i in range(self.building_count)]
 
         while not done:
 
@@ -297,9 +322,16 @@ class TRPO:
             next_state, _, done, _, _ = self.eval_env.step(action)
 
             if self.personalization:
-                state = [np.concatenate((self.encoder*i, self.train_running_state[i](next_state[i]))) for i in range(self.building_count)]
+                state = [np.concatenate((
+                    self.encoder * i,
+                    self.periodic_encoder*next_state[i][0],
+                    self.train_running_state[i](next_state[i][1:])
+                )) for i in range(self.building_count)]
             else:
-                state = [self.eval_running_state[i](next_state[i]) for i in range(self.building_count)]
+                state = [np.concatenate((
+                    self.periodic_encoder*next_state[i][0],
+                    self.train_running_state[i](next_state[i][1:])
+                )) for i in range(self.building_count)]
         
         # Logging
 
@@ -466,10 +498,8 @@ if __name__ == "__main__":
         reward_function=NetElectricity
     )
 
-    # select buildings
-    buildings = select_buildings(DATASET_NAME, BUILDING_COUNT, 1)  # Fix seed to maintain building selection among different seeds for the models
+    # select days for evaluation
 
-    # select days
     simulation_start_time_step, simulation_end_time_step = select_simulation_period(DATASET_NAME, DAY_COUNT, 1) # Fix seed to maintain simulation period among different seeds for the models
 
     eval_env = CityLearnEnv(
