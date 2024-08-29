@@ -78,8 +78,8 @@ class TRPO:
             self.train_running_state = [ZFilter((self.num_inputs - self.building_count - 2,), clip = 5) for _ in range(self.building_count)]
             self.eval_running_state = [ZFilter((self.num_inputs - self.building_count - 2,), clip = 5) for _ in range(self.building_count)]
         else:
-            self.train_running_state = [ZFilter((self.num_inputs - 1,), clip = 5) for _ in range(self.building_count)]
-            self.eval_running_state = [ZFilter((self.num_inputs - 1,), clip = 5) for _ in range(self.building_count)]
+            self.train_running_state = [ZFilter((self.num_inputs - 2,), clip = 5) for _ in range(self.building_count)]
+            self.eval_running_state = [ZFilter((self.num_inputs - 2,), clip = 5) for _ in range(self.building_count)]
 
         # Properties
             
@@ -312,6 +312,11 @@ class TRPO:
         if self.personalization:
             state = [np.concatenate((
                 self.encoder * i,
+                self.periodic_encoder * state[i][0],
+                self.train_running_state[i](state[i][1:])
+            )) for i in range(self.building_count)]
+        else:
+            state = [np.concatenate((
                 self.periodic_encoder * state[i][0],
                 self.train_running_state[i](state[i][1:])
             )) for i in range(self.building_count)]
