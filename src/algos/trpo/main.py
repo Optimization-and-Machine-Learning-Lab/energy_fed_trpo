@@ -437,7 +437,6 @@ def parse_args():
     parser.add_argument('--training-type', type=str, default='individual', choices={'individual', 'upperbound', 'fl', 'fl-personalized'}, help='Training type (default: individual)')
     parser.add_argument('--pre_training_steps', type=int, default=0, help='Number of pre-training steps (default: 0)')
     parser.add_argument('--wandb-log', default=False, action='store_true', help='Log to wandb (default: True)')
-    parser.add_argument('--data-path', type=str, default='./data/schemas/warmup/', help='data schema path')
     parser.add_argument('--device', type=str, default=None, help='device (default: None)')
     parser.add_argument('--n_episodes', type=int, default=1500, help='Number of episodes (default: 1500)')
     parser.add_argument('--dataset', type=str, default='citylearn_challenge_2022_phase_all', help='Dataset name (default: citylearn_challenge_2022_phase_all)')

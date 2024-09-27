@@ -5,9 +5,9 @@ import argparse
 import numpy as np
 import scipy.optimize
 
-from TRPO.trpo import *
-from utils import *
-from models import *
+from trpo import *
+from src.utils import *
+from models import Policy, Value
 from tqdm import tqdm
 from time import time
 from pathlib import Path
@@ -15,9 +15,9 @@ from replay_memory import Memory
 from running_state import ZFilter
 from collections import namedtuple
 from torch.autograd import Variable
-from CustomCityLearn.citylearn.gen_citylearn import CityLearnEnv as CustomCityLearnEnv
-from citylearn.citylearn import CityLearnEnv
 
+from CustomCityLearn.citylearn.gen_citylearn import CityLearnEnv
+from src.utils.cl_generate_data import generate_simplified_data
 
 class TRPO:
 
@@ -46,7 +46,7 @@ class TRPO:
         self.num_actions = train_env.action_space[0].shape[0]
         self.building_count = len(train_env.buildings)
 
-        if self.train_env.schema['personalization']:
+        if self.train_env.one_hot:
 
             self.num_inputs += self.building_count
 
@@ -64,7 +64,7 @@ class TRPO:
 
         # state: [onehot?, temperature, humidity, battery_storage, consumption, price, hour1, hour2]
 
-        if train_env.schema['personalization']:
+        if train_env.one_hot:
             self.running_state = [ZFilter((self.num_inputs-self.building_count,), clip=5) for _ in range(self.building_count)]
         else:
             self.running_state = [ZFilter((self.num_inputs,), clip=5) for _ in range(self.building_count)]
@@ -76,7 +76,7 @@ class TRPO:
 
     def select_action(self, state, eval : bool = False):
 
-        state = torch.tensor(state).unsqueeze(0).to(torch.get_default_dtype()).to(device=self.device)
+        state = torch.from_numpy(state).unsqueeze(0).to(torch.get_default_dtype()).to(device=self.device)
         action_mean, _, action_std = self.policy_net(Variable(state))
         action = torch.normal(action_mean, action_std)
 
@@ -84,7 +84,7 @@ class TRPO:
 
     def update_params(self, batch):
 
-        rewards = torch.Tensor(np.stack(batch.reward)).to(device=self.device)
+        rewards = torch.Tensor(batch.reward).to(device=self.device)
         masks = torch.Tensor(batch.mask).to(device=self.device)
         actions = torch.Tensor(np.concatenate(batch.action, 0)).unsqueeze(-1).to(device=self.device)
         states = torch.Tensor(np.array(batch.state)).to(device=self.device)
@@ -188,25 +188,25 @@ class TRPO:
 
                     # Add encoding if enabled
 
-                    if self.train_env.schema['personalization']:
+                    if self.train_env.one_hot:
                         state = [np.concatenate((state[i][:self.building_count], self.running_state[i](state[i][self.building_count:]))) for i in range(self.building_count)]
 
                     # Init training variables
 
                     reward_sum = np.array([0.] * self.building_count)
-                    # emission_sum = np.array([0.] * self.building_count)
+                    emission_sum = np.array([0.] * self.building_count)
 
                     done = False
 
                     while not done:
 
-                        action = [self.select_action(state[b]).detach().cpu().numpy()[0] for b in range(self.building_count)]
+                        action = [self.select_action(state[b]).item() for b in range(self.building_count)]
                         next_state, reward, done, _ = self.train_env.step(action)
 
-                        reward_sum += np.array(reward).squeeze()
-                        # emission_sum += np.array(reward) * self.train_env.buildings[0].current_carbon_intensity()
+                        reward_sum += reward
+                        emission_sum += np.array(reward) * self.train_env.buildings[0].current_carbon_intensity()
 
-                        if self.train_env.schema['personalization']:
+                        if self.train_env.one_hot:
                             next_state = [np.concatenate((next_state[i][:self.building_count], self.running_state[i](next_state[i][self.building_count:]))) for i in range(self.building_count)]
                         else:    
                             next_state = [self.running_state[i](next_state[i]) for i in range(self.building_count)]
@@ -222,7 +222,7 @@ class TRPO:
                     num_episodes += 1
 
                     reward_batch += reward_sum
-                    # emission_batch += emission_sum
+                    emission_batch += emission_sum
 
                 reward_batch /= self.batch_size
                 emission_batch /= self.batch_size
@@ -240,10 +240,10 @@ class TRPO:
 
                     # For logging
 
-                    base_name = f"train/b_{b+1}_"
+                    base_name = f"train/b_{self.train_env.buildings[b].name[-1]}_"
 
                     train_log[f"{base_name}reward_avg"] = reward_sum[b]/24
-                    # train_log[f"{base_name}emission_avg"] = emission_sum[b]/24
+                    train_log[f"{base_name}emission_avg"] = emission_sum[b]/24
                     train_log[f"{base_name}reward_batch_avg"] = reward_batch[b]/24
                     train_log[f"{base_name}emission_batch_avg"] = emission_batch[b]/24
 
@@ -268,25 +268,25 @@ class TRPO:
     def evaluation(self):
 
         eval_reward = np.array([0.] * self.building_count)
-        # eval_emission = np.array([0.] * self.building_count)
+        eval_emission = np.array([0.] * self.building_count)
 
         done = False
         state = self.eval_env.reset()
 
         # Add encoding if enabled
 
-        if self.eval_env.schema['personalization']:
+        if self.eval_env.one_hot:
             state = [np.concatenate((state[i][:self.building_count], self.running_state[i](state[i][self.building_count:]))) for i in range(self.building_count)]
 
         while not done:
 
-            action = [self.select_action(state[b], eval=True).detach().cpu().numpy() for b in range(self.building_count)]
+            action = [self.select_action(state[b], eval=True).item() for b in range(self.building_count)]
             next_state, reward, done, _ = eval_env.step(action)
 
             eval_reward += reward
-            # eval_emission -= np.array(reward) * eval_env.buildings[0].current_carbon_intensity()
+            eval_emission -= np.array(reward) * eval_env.buildings[0].current_carbon_intensity()
 
-            if self.eval_env.schema['personalization']:
+            if self.eval_env.one_hot:
                 state = [np.concatenate((next_state[i][:self.building_count], self.running_state[i](next_state[i][self.building_count:]))) for i in range(self.building_count)]
             else:
                 state = [self.running_state[i](next_state[i]) for i in range(self.building_count)]
@@ -297,10 +297,10 @@ class TRPO:
         
         for b in range(self.building_count):
 
-            base_name = f"eval/b_{b+1}_"
+            base_name = f"eval/b_{self.eval_env.buildings[b].name[-1]}_"
 
             eval_log[f"{base_name}reward_avg"] = eval_reward[b]/24
-            # eval_log[f"{base_name}emission_avg"] = eval_emission[b]/24
+            eval_log[f"{base_name}emission_avg"] = eval_emission[b]/24
 
         return eval_log
 
@@ -361,9 +361,8 @@ def parse_args():
     parser.add_argument('--training-type', type=str, default='individual', choices={'individual', 'upperbound', 'fl', 'fl-personalized'}, help='Training type (default: individual)')
     parser.add_argument('--building-no', type=int, default=0, help='Trained building (if individual building training)')
     parser.add_argument('--wandb-log', default=False, action='store_true', help='Log to wandb (default: True)')
-    parser.add_argument('--data-path', type=str, default='./data/schemas/warmup/', help='data schema path')
+    parser.add_argument('--data-path', type=str, default='CustomCityLearn/citylearn/data/gen_data/', help='data schema path')
     parser.add_argument('--device', type=str, default=None, help='device (default: None)')
-    parser.add_argument('--env-type', type=str, default='citylearn', choices={'citylearn', 'custom'}, help='Environment type (default: citylearn)')
 
     args = parser.parse_args()
 
@@ -395,20 +394,20 @@ if __name__ == "__main__":
 
     if args.wandb_log:
 
-        run =  wandb.init(
-            name=f"{args.training_type}_seed_{args.seed}_{str(int(time()))}", 
+        run = wandb.init(
+            name=f"{args.training_type}{'' if 'fl' in args.training_type else ''}_seed_{args.seed}_{str(int(time()))}", 
             project="trpo_rl_energy",
             entity="optimllab",
             config={
-                "algorithm": "trpo",
-                "training_type": args.training_type,
-                "seed": args.seed,
-                "gamma": args.gamma,
-                "tau": args.tau,
-                "l2_reg": args.l2_reg,
-                "max_kl": args.max_kl,
-                "damping": args.damping,
-                "batch_size": args.batch_size,
+            "algorithm": "trpo",
+            "training_type": args.training_type,
+            "seed": args.seed,
+            "gamma": args.gamma,
+            "tau": args.tau,
+            "l2_reg": args.l2_reg,
+            "max_kl": args.max_kl,
+            "damping": args.damping,
+            "batch_size": args.batch_size,
             },
             sync_tensorboard=False,
         )
@@ -417,12 +416,7 @@ if __name__ == "__main__":
 
     schema_filepath = args.data_path + ('schema_eval.json' if args.training_type == 'upperbound' else 'schema.json')
     eval_schema_filepath = args.data_path + 'schema_eval.json'
-
-    if args.env_type == 'custom':
-
-        schema_filepath = schema_filepath.replace('.json', '_custom.json')
-        eval_schema_filepath = eval_schema_filepath.replace('.json', '_custom.json')
-
+    
     with open(schema_filepath) as json_file:
         schema_dict = json.load(json_file)
     with open(eval_schema_filepath) as json_eval_file:
@@ -443,16 +437,9 @@ if __name__ == "__main__":
                 schema_dict_eval["buildings"][b_name]["include"] = False
 
     # Environment initialization
-    
-    if args.env_type == 'citylearn':
-
-        train_env = CityLearnEnv(schema=schema_dict)
-        eval_env = CityLearnEnv(schema=schema_dict_eval)
-
-    else:
-
-        train_env = CustomCityLearnEnv(schema=schema_dict)
-        eval_env = CustomCityLearnEnv(schema=schema_dict_eval)
+                
+    train_env = CityLearnEnv(schema=schema_dict)
+    eval_env = CityLearnEnv(schema=schema_dict_eval)
 
     # TRPO initialization
 

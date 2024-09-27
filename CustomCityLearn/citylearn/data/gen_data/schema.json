@@ -1,6 +1,6 @@
 {
-  "root_directory": "./CityLearn/citylearn/data/gen_data/",
-  "central_agent": false,
+  "root_directory": "CustomCityLearn/citylearn/data/gen_data/",
+  "central_agent": true,
   "simulation_start_time_step": 0,
   "simulation_end_time_step": 23,
   "episodes": 1,
