@@ -26,11 +26,12 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-
 from citylearn.data import DataSet
 from matplotlib import pyplot as plt
 from matplotlib import ticker as ticker
 from citylearn.citylearn import CityLearnEnv
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 def select_buildings(
     dataset_name: str, count: int, seed: int, buildings_to_exclude: list[str] = None,
@@ -485,3 +486,22 @@ def plot_simulation_summary(envs: dict[str, CityLearnEnv]):
     print('District-level daily-average load profiles:')
     _ = plot_district_load_profiles(envs, daily_average=True)
     plt.show()
+
+def make_env(env):
+    """
+    Initialize the environment.
+
+    Args:
+        env_path (str): Path to the environment configuration file.
+        dataset (str): Path to the dataset file.
+
+    Returns:
+        env (gym.Env): The environment.
+    """
+
+    # Wrap the environment with Monitor for logging and DummyVecEnv for normalization
+    env = Monitor(env)
+    env = DummyVecEnv([lambda: env])
+    env = VecNormalize(env, norm_obs=True, norm_reward=True)
+
+    return env

@@ -1,188 +1,276 @@
-import sys
 import os
 import json
-import hashlib
-
 import random
-import pandas as pd
+
 import numpy as np
-import torch
+import pandas as pd
 
+from pathlib import Path
 from citylearn.data import DataSet
-from citylearn.energy_model import PV
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
+# Bases used to generate simple data for the buildings
 
-def make_env(env):
-    """
-    Initialize the environment.
+MONTHLY_MEAN_TEMP = [
+    [0, 1.9, 6.2, 11.5, 15.9, 19.8, 21.8, 21.5, 16.5, 10.9, 5.6, 1],
+    [1, 4, 10, 16, 21, 25, 27, 25, 21, 15, 8, 2],
+    [17, 17, 20, 23, 27, 29, 29, 29, 28, 26, 22, 18],
+    [0, 0, 0, 3, 6, 9, 11, 7, 4, 3, 2, 1],
+    [20, 20.5, 19, 16.4, 14.4, 12.1, 11.3, 11.9, 13.3, 14.6, 19.6, 15.65]
+]
 
-    Args:
-        env_path (str): Path to the environment configuration file.
-        dataset (str): Path to the dataset file.
+MONTHLY_MEAN_HUM = [
+    [77, 70, 58, 49, 49, 50, 49, 51, 52, 62, 76, 80],
+    [66, 62, 67, 68, 68, 62, 71, 75, 79, 77, 74, 69],
+    [56.2, 69.9, 66.5, 68.2, 69.7, 70, 67.8, 67.5, 63.5, 57, 57.2, 52.8],
+    [74.4, 72, 72.6, 69.1, 70, 72, 76.3, 76.8, 75, 75.8, 75.7, 74.6],
+    [78, 80, 82, 83, 86, 86, 86, 83, 82, 77, 76, 77]
+]
 
-    Returns:
-        env (gym.Env): The environment.
-    """
+LOAD_DAY_CHANGE = [
+    [0.5, -0.2, -0.2, -0.2, -0.2, -0.2, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 1.5, 1.5, 1], # B1: Programmer
+    [0.5, 1, 1, 2, 1, 0, -0.2, -0.3, -0.3, -0.3, -0.4, -0.3, -0.3, 3, 2, 2, 3, 2, 1, 2, 1, 1, 1, 1], # B2: Work from home at night
+    [2, 2, 2, 2, 2, 2, 2, 2, 3, 3.5, 1.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 2, 3, 3, 2, 2, 2, 2], # B3: College student
+    [-0.3, -0.3, -0.3, -0.3, -0.3, -0.3, 2, 0, -0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -0.2, 2, 3, 3, 2, 1, -0.2], # B4: Civil servant
+    [2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 3, 2, 3, 3, 3, 3, 2, 0, 0, 1, 1] # B5: Rich second generation
+]
 
-    # Wrap the environment with Monitor for logging and DummyVecEnv for normalization
-    env = Monitor(env)
-    env = DummyVecEnv([lambda: env])
-    env = VecNormalize(env, norm_obs=True, norm_reward=True)
+SOLAR_DAY_CHANGE = [
+    [0, 0, 0, 0, 0, 0, -280, -200, -40, 150, 300, 325, 350, 350, 300, 250, 100, -150, -250, -280, 0, 0, 0, 0], #B1
+    [0, 0, 0, 0, 0, 0, -140, -100, 0, 120, 210, 230, 249, 240, 103, 98, 12, -123, -140, -150, 0, 0, 0, 0], # B2
+    [0, 0, 0, 0, 0, 0, -290, -210, -100, 50, 150, 210, 300, 320, 300, 310, 200, 50, -120, -250, 0, 0, 0, 0], # B3
+    [0, 0, 0, 0, 0, 0, -300, -300, -300, -250, -150, 0, 129, 150, 92, 0, -170, -300, -300, -300, 0, 0, 0, 0], # B4
+    [0, 0, 0, 0, 0, 0, -120, -50, 120, 210, 270, 320, 350, 380, 320, 280, 130, -50, -100, -130, 0, 0, 0, 0] # B5
+]
 
-    return env
+WEATHER_RANDOMNESS = {
+    "training": {
+        "temperature": {"low": 15, "high": 20},
+        "humidity": {"low": 0, "high": 50},
+    },
+    "eval": {
+        "temperature": {"low": 23.5, "high": 23.5001},
+        "humidity": {"low": 53.5, "high": 53.5001},
+    }
+}
 
-def create_building_csv(building_ix, base_path: str = 'data/schemas/warm_up/'):
+OTHER_PARAMETERS = {
+    "ac_eff": [1, 1.2, 2.1, 0.9, 1.2],
+    "solar_eff": [1, 1.2, 0.5, 0.8, 1.2],
+    "solar_escale": [0.6, 0.5, 0.5, 0.9, 0.5],
+    "solar_incercept": [350, 368, 320, 290, 400],
+}
 
-    # Create the building csv file combining all the existing buildings
+# Useful function definitions
 
-    building_csv = f'Building_{building_ix}.csv'
+def generate_day_temperature(month, month_day, b):
 
-    # Read the 3 existing csv files for the buildings
+    if month_day < 15:
+        last_month = month - 1
+        return MONTHLY_MEAN_TEMP[b][month] + (MONTHLY_MEAN_TEMP[b][last_month] - MONTHLY_MEAN_TEMP[b][month]) * (15 - month_day) / 30
+    else:
+        next_month = (month + 1) % 12
+        return MONTHLY_MEAN_TEMP[b][month] + (MONTHLY_MEAN_TEMP[b][next_month] - MONTHLY_MEAN_TEMP[b][month]) * (month_day - 15) / 30
+    
+def generate_day_humidity(month, month_day, b):
 
-    building_1 = np.genfromtxt(base_path + 'Building_1.csv', delimiter=',')
-    building_2 = np.genfromtxt(base_path + 'Building_2.csv', delimiter=',')
-    building_3 = np.genfromtxt(base_path + 'Building_3.csv', delimiter=',')
+    if month_day < 15:
+        last_month = month - 1
+        return MONTHLY_MEAN_HUM[b][month] + (MONTHLY_MEAN_HUM[b][month] - MONTHLY_MEAN_HUM[b][last_month]) * (15 - month_day) / 30
+    else:
+        next_month = (month + 1) % 12
+        return MONTHLY_MEAN_HUM[b][month] + (MONTHLY_MEAN_HUM[b][next_month] - MONTHLY_MEAN_HUM[b][month]) * (month_day - 15) / 30
 
-    # Get the headers for the csv
+def generate_hour_load(efficiency, weather_data):      # extra power for ac and heating. efficiency \in [2, 5]
 
-    headers = np.genfromtxt(base_path + 'Building_1.csv', delimiter=',', dtype=str)[0].tolist()
-    headers = ",".join(headers)
+    temp = weather_data[0]
+    hum = weather_data[1]
+    
+    # Rule base generation of load based on temperature and humidity
 
-    # Combine the 3 buildings with random coefficients but keep the first columns intact
+    if hum > 60:
+        hum_load = (hum - 60) / 20 / efficiency
+    else:
+        hum_load = 0
 
-    building = (building_1 * random.uniform(0.8, 0.9) + building_2 * random.uniform(0.8, 0.9) + building_3 * random.uniform(0.8, 0.9))[1:] / 4
-    building[:,0:3] = building_1[1,0:3]
-    building[:,2] = np.array([[random.randint(1,7)]*24 for _ in range(int(720/24))]).flatten()
-    building[:,12] = building[:,12].astype(np.int32)
-    building[:,14] = 1
+    if temp > 25:
+        temp_load = temp / 25 / efficiency
+    elif temp < 15:
+        temp_load = (30 - temp) / 25 / efficiency
+    else:
+        temp_load = 0
+    
+    return hum_load + temp_load
 
-    # Save the building csv
+def get_hour_solar(temp, intercept, efficiency, panel_scale):
 
-    np.savetxt(base_path + building_csv, building, delimiter=',', header=headers, fmt='%s')
+    return (intercept + temp * efficiency) * panel_scale
 
-def generate_simplified_data(
-    base_dataset: str = 'citylearn_challenge_2022_phase_all',
-    weather_randomness: dict = {'temperature': {'low': 15, 'high': 20}, 'humidity': {'low': 0, 'high': 50}},
-):
+def generate_simplified_data(base_dataset: str = 'citylearn_challenge_2022_phase_all', dest_folder: str = 'data/simple_data/'):
+
+    # Make sure the destination folder exists including the subfolders
+
+    Path(dest_folder).mkdir(parents=True, exist_ok=True)
+
+    # Get reference schema
 
     schema = DataSet.get_schema(base_dataset)
 
+    # Reduce the number of buildings to 5
+
+    schema['buildings'] = {f'Building_{i}': schema['buildings'][f'Building_{i}'] for i in range(1, 6)}
+
+    # Extract the base weather, emissions and pricing data (doesn't change among buildings)
+
+    base_weather = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['weather']))
+    base_pricing = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['pricing']))
+    base_emissions = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['carbon_intensity']))
+
     # Read the base schema and process the json
 
-    for building_name, info in schema['buildings'].items():
-        
+    for building_no, (building_name, info) in enumerate(schema['buildings'].items()):
+
         # Create custom building CSVs
 
         base_csv = pd.read_csv(os.path.join(schema['root_directory'], info['energy_simulation']))
-        weather = pd.read_csv(os.path.join(schema['root_directory'], info['weather']))
 
-        # Define randomness for the weather data
+        sigma_load_hourly = 0.01
+        sigma_solar_hourly = 5
+        sigma_hourly_temp = 0.01
+        sigma_hourly_hum = 1
+        temp_day_change = 4
+        hum_day_change = 12
 
-        delta_temp = random.random() * (weather_randomness['temperature']['high'] - weather_randomness['temperature']['low']) + weather_randomness['temperature']['low']
-        delta_hum = random.random() * (weather_randomness['humidity']['high'] - weather_randomness['humidity']['low']) + weather_randomness['humidity']['low']
+        weather_data = [[0.] * 2 for _ in range(365 * 24)] # We need just to store the temperature and humidity
+        building_data = [[0.] * 4 for _ in range(365 * 24)] # We need just to store the month, hour, load and generation
 
-        temp = weather['outdoor_dry_bulb_temperature'] + delta_temp
-        hum = weather['outdoor_relative_humidity'] + delta_hum
+        for day in range(365):
 
-        # Configure solar panel like it's processed in the library
+            month = day // 31
+            month_day = day % 31
 
-        # in case device technical specifications are to be randomly sampled, make sure each device per building has a unique seed
+            base_temp = generate_day_temperature(month=month, month_day=month_day, b=building_no)
+            base_hum = generate_day_humidity(month=month, month_day=month_day, b=building_no)
+
+            for hour in range(24):
+
+                if hour < 12:
+                    weather_data[day * 24 + hour][0] = random.gauss(base_temp + (temp_day_change / 12 * hour - temp_day_change / 2), sigma_hourly_temp)
+                    weather_data[day * 24 + hour][1] = random.gauss(base_hum + (hum_day_change / 2 - hum_day_change / 12 * (hour - 12)), sigma_hourly_hum)
+                else:
+                    weather_data[day * 24 + hour][0] = random.gauss(base_temp + (temp_day_change / 2 - temp_day_change / 12 * (hour - 12)), sigma_hourly_temp)
+                    weather_data[day * 24 + hour][1] = random.gauss(base_hum + (hum_day_change / 12 * hour - hum_day_change / 2), sigma_hourly_hum)
+
+                # Generate simpler data for non_shiftable_load based on humidity and temperature 
         
-        md5 = hashlib.md5()
-        device_random_seed = 0
+                building_data[day * 24 + hour][0] = month + 1
+                building_data[day * 24 + hour][1] = hour if hour != 0 else 24
 
-        for string in [building_name, 'citylearn.citylearn.Building', 'pv', 'citylearn.energy_model.PV']:
-            md5.update(string.encode())
-            hash_to_integer_base = 16
-            device_random_seed += int(md5.hexdigest(), hash_to_integer_base)
+                base_load = generate_hour_load(OTHER_PARAMETERS['ac_eff'][building_no], weather_data[day * 24 + hour])
+                base_solar = get_hour_solar(
+                    weather_data[day * 24 + hour][0], OTHER_PARAMETERS['solar_incercept'][building_no], OTHER_PARAMETERS['solar_eff'][building_no],
+                    OTHER_PARAMETERS['solar_escale'][building_no]
+                )
 
-        device_random_seed = int(str(device_random_seed*(schema['random_seed'] + 1))[:9])
+                building_data[day * 24 + hour][2] = random.gauss(base_load + LOAD_DAY_CHANGE[building_no][hour], sigma_load_hourly)
 
-        attributes = {
-            **info['pv']['attributes'],
-            'random_seed': device_random_seed
-        }
+                if hour < 6 or hour > 19:
+                    building_data[day * 24 + hour][3] = 0
+                else:
+                    building_data[day * 24 + hour][3] = random.gauss(base_solar + SOLAR_DAY_CHANGE[building_no][hour], sigma_solar_hourly)
 
-        pv = PV(**attributes)
+        # Update the base csv with the new data
 
-        # Generate simpler data for non_shiftable_load based on humidity and temperature 
+        building_data = np.array(building_data).clip(min=0)
+        weather_data = np.array(weather_data)
 
-        base_csv['non_shiftable_load'] = base_csv['non_shiftable_load'] + (hum - 60)/20 + (30 - temp)/25
-        base_csv['solar_generation'] = pv.get_generation((temp * attributes['nominal_power'] ** 2) * base_csv['solar_generation']) * -1
+        base_csv['month'] = building_data[:,0].astype(np.int32)
+        base_csv['hour'] = building_data[:,1].astype(np.int32)
+        base_csv['non_shiftable_load'] = building_data[:,2]
+        base_csv['solar_generation'] = building_data[:,3]
 
-        print('test')
+        # Update the weather data for this building. 
 
-    # with open(ref_schema + 'schema.json', 'r') as f:
+        base_weather['outdoor_dry_bulb_temperature'] = weather_data[:,0]
+        base_weather['outdoor_relative_humidity'] = weather_data[:,1]
 
-    #     schema = f.read()
-    #     schema = json.loads(schema)
+        # Save the new CSVs to the destination folder
 
-    #     # Extract existing buildings information
+        base_csv.to_csv(os.path.join(dest_folder, f'{building_name}.csv'), index=False)
+        base_weather.to_csv(os.path.join(dest_folder, f'weather_{building_name[-1]}.csv'), index=False)
 
-    #     existing_buildings = schema['buildings']
-    #     new_buildings = existing_buildings.copy()
+        # Update the schema with the new paths
 
-    #     # Copy structure of existing buildings
+        schema['buildings'][building_name]['energy_simulation'] = f'{building_name}.csv'
+        schema['buildings'][building_name]['weather'] = f'weather_{building_name[-1]}.csv'
 
-    #     for i in range(len(existing_buildings), n_buildings):
+    # Write pricing and emissions data to the destination folder
 
-    #         base_building_index = random.randint(1, len(new_buildings))
-    #         generated_building = new_buildings[f'Building_{base_building_index}'].copy()
+    base_pricing.to_csv(os.path.join(dest_folder, 'pricing.csv'), index=False)
+    base_emissions.to_csv(os.path.join(dest_folder, 'carbon_intensity.csv'), index=False)
 
-    #         # Replace building name
+    # Save the new schema in the destination folder
 
-    #         name = f'Building_{1 + i}'
-    #         generated_building['energy_simulation'] = f'Building_{1 + i}.csv'
+    schema['root_directory'] = dest_folder
 
-    #         # Generate csv for the building
+    with open(os.path.join(dest_folder, 'schema.json'), 'w') as f:
+        json.dump(schema, f, indent=4)
 
-    #         create_building_csv(1 + i)
+def get_perturbed_data(source_folder: str = 'data/simple_data/', type: str = 'training'):
 
-    #         # Randomly modify the cooling device by combinining the existing buildings linearly
+    # Get current schema
 
-    #         generated_building['cooling_device']['attributes']['nominal_power'] *= random.uniform(1.1, 1.3)
-    #         generated_building['cooling_device']['attributes']['efficiency'] = random.uniform(0.25, 1)
-    #         generated_building['cooling_device']['attributes']['target_cooling_temperature'] *= random.uniform(0.9, 1.1)
-    #         generated_building['cooling_device']['attributes']['target_heating_temperature'] *= random.uniform(0.9, 1.1)
+    schema = json.loads(open(os.path.join(source_folder, 'schema.json')).read())
 
-    #         # Randomly modify the dwh device
+    # Define object to return the updated data
 
-    #         generated_building['dhw_device']['attributes']['nominal_power'] *= random.uniform(0.9, 1.1)
-    #         generated_building['dhw_device']['attributes']['efficiency'] = random.uniform(0.2, 5)
+    new_data = {
+        'outdoor_dry_bulb_temperature': [],
+        'outdoor_relative_humidity': [],
+        'non_shiftable_load': [],
+        'solar_generation': []
+    }
 
-    #         # Randomly modify the dwh storage
+    # Read the base schema and process the json
 
-    #         generated_building['dhw_storage']['attributes']['capacity'] *= random.uniform(0.9, 1.1)
-    #         generated_building['dhw_storage']['attributes']['loss_coefficient'] *= random.uniform(0.9, 1.1)
+    for building_no, (building_name, info) in enumerate(schema['buildings'].items()):
 
-    #         # Randomly modify electrical storage
+        # Create custom building CSVs
 
-    #         generated_building['electrical_storage']['attributes']['capacity'] *= random.uniform(0.9, 1.1)
-    #         generated_building['electrical_storage']['attributes']['efficiency'] = random.uniform(0.8, 1)
-    #         generated_building['electrical_storage']['attributes']['capacity_loss_coefficient'] *= random.uniform(0.9, 1.1)
-    #         generated_building['electrical_storage']['attributes']['loss_coefficient'] *= random.uniform(0.9, 1.1)
-    #         generated_building['electrical_storage']['attributes']['nominal_power'] *= random.uniform(0.9, 1.1)
-    #         generated_building['electrical_storage']['attributes']['depth_of_discharge'] *= random.uniform(0.9, 1.1)
+        base_csv = pd.read_csv(os.path.join(schema['root_directory'], info['energy_simulation']))
+        base_weather = pd.read_csv(os.path.join(schema['root_directory'], info['weather']))
 
-    #         # Randomly modify the pv generator
+        data_length = len(base_csv)
+    
+        # Compute randomness for the weather data (uniform sample between high and lower bounds)
 
-    #         generated_building['pv']['attributes']['nominal_power'] *= random.uniform(0.9, 1.1)
+        weather_randomness = WEATHER_RANDOMNESS[type]
 
-    #         # Randomly modify the power outage attributes
+        delta_temp = np.random.uniform(weather_randomness['temperature']['low'], weather_randomness['temperature']['high'], data_length)
+        delta_hum = np.random.uniform(weather_randomness['humidity']['low'], weather_randomness['humidity']['high'], data_length)
 
-    #         generated_building['power_outage']["stochastic_power_outage_model"]['attributes']['random_seed'] = random.randint(0, 1000)
-    #         generated_building['power_outage']["stochastic_power_outage_model"]['attributes']['saifi'] *= random.uniform(0.9, 1.1)
-    #         generated_building['power_outage']["stochastic_power_outage_model"]['attributes']['caidi'] *= random.uniform(0.9, 1.1)
+        # Update temperature and humidity data
 
-    #         # Replace building i
+        base_temp = base_weather['outdoor_dry_bulb_temperature'].to_numpy()
+        base_hum = base_weather['outdoor_relative_humidity'].to_numpy()
 
-    #         new_buildings[name] = generated_building
+        temperature = base_temp + delta_temp
+        humidity = base_hum + delta_hum
 
-    #     # Save the new schema
+        # Compute the new solar generation and non-shiftable load
 
-    #     schema['buildings'] = new_buildings
+        base_load = base_csv['non_shiftable_load'].to_numpy()
+        base_solar = base_csv['solar_generation'].to_numpy()
 
-    #     with open(ref_schema + 'schema_generated.json', 'w') as f:
-    #         json.dump(schema, f, indent=4)
+        non_shiftable_load = (humidity - 60) / 20 / OTHER_PARAMETERS['ac_eff'][building_no] + (temperature - 25) / 25 / OTHER_PARAMETERS['ac_eff'][building_no] + base_load
+        solar_generation = (OTHER_PARAMETERS['solar_incercept'][building_no] + temperature * OTHER_PARAMETERS['solar_eff'][building_no]) * OTHER_PARAMETERS['solar_escale'][building_no] + base_solar
+        
+        # Add to dictionary
+
+        new_data['outdoor_dry_bulb_temperature'].append(temperature)
+        new_data['outdoor_relative_humidity'].append(humidity)
+        new_data['non_shiftable_load'].append(non_shiftable_load)
+        new_data['solar_generation'].append(solar_generation)
+
+    # Return new data
+
+    return new_data

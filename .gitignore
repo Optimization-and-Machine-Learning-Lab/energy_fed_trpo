@@ -3,3 +3,7 @@ __pycache__/
 banma.py
 .vscode
 logs/
+
+# Ignore data files
+
+data/

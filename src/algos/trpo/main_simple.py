@@ -1,5 +1,6 @@
 import wandb
 import torch
+import json
 import argparse
 import numpy as np
 import scipy.optimize
@@ -19,6 +20,7 @@ from src.algos.trpo.trpo import *
 from src.utils.cl_rewards import *
 from src.algos.trpo.models import *
 from src.utils.cl_env_helper import *
+from src.utils.cl_generate_data import get_perturbed_data
 
 ACTIVE_OBSERVATIONS = [
     'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
@@ -30,7 +32,7 @@ class TRPO:
     def __init__(
         self, train_env : CityLearnEnv, eval_env : CityLearnEnv, device='cpu', gamma : float = 0.995, tau : float = 0.97, l2_reg : float = 1e-3, 
         max_kl : float = 1e-2, damping : float = 1e-1, seed : int = 1, batch_size : int = 15000, log_interval : int = 1, wandb_log : bool = False,
-        training_type : dict = 'fl'
+        training_type : dict = 'fl', noisy : bool = False
     ):
 
         self.device = device
@@ -47,6 +49,7 @@ class TRPO:
         self.log_interval = log_interval
         self.wandb_log = wandb_log
         self.personalization = training_type == 'fl-personalized'
+        self.noisy = noisy
 
         # Extract environments characteristics
 
@@ -201,11 +204,29 @@ class TRPO:
 
                 # Increment the pre-training index when num_episodes // self.building_count timesteps passed
                 
-                pre_training_idx = i_episode // (pre_training_episodes // self.building_count)
+                if pre_training_episodes != 0:
+
+                    pre_training_idx = i_episode // (pre_training_episodes // self.building_count)
 
                 while num_steps < self.batch_size:
 
                     state, _ = self.train_env.reset()
+
+                    ### THIS LOGIC IS ADDED HERE TO AVOID MODIFYING THE STANDARD ENVIRONMENT ###
+
+                    # If noise is enabled, replace the environment time series with a noisy version
+
+                    if self.noisy:
+
+                        noisy_data = get_perturbed_data()
+
+                        for b in range(self.building_count):
+
+                            self.train_env.buildings[b].energy_simulation._non_shiftable_load = noisy_data['non_shiftable_load'][b]
+                            self.train_env.buildings[b].energy_simulation._solar_generation = noisy_data['solar_generation'][b]
+
+                            self.train_env.buildings[b].weather._outdoor_dry_bulb_temperature = noisy_data['outdoor_dry_bulb_temperature'][b]
+                            self.train_env.buildings[b].weather._outdoor_relative_humidity = noisy_data['outdoor_relative_humidity'][b] 
 
                     # Add encoding if enabled
 
@@ -221,12 +242,16 @@ class TRPO:
                             self.train_running_state[i](state[i][1:])
                         )) for i in range(self.building_count)]
 
+                    ### END OF SECTION ###
+
                     done = False
 
                     while not done:
 
                         action = [self.select_action(state[b]).detach().cpu().numpy() for b in range(self.building_count)]
                         next_state, reward, done, _, _ = self.train_env.step(action)
+
+                        ### THIS LOGIC IS ADDED HERE TO AVOID MODIFYING THE STANDARD ENVIRONMENT ###
 
                         if self.personalization:
                             next_state = [np.concatenate((
@@ -239,6 +264,8 @@ class TRPO:
                                 self.periodic_encoder * next_state[i][0],
                                 self.train_running_state[i](next_state[i][1:])
                             )) for i in range(self.building_count)]
+
+                        ### END OF SECTION ###
 
                         mask = 0 if done else 1
 
@@ -322,6 +349,20 @@ class TRPO:
         done = False
         state, _ = self.eval_env.reset()
 
+        ### THIS LOGIC IS ADDED HERE TO AVOID MODIFYING THE STANDARD ENVIRONMENT ###
+
+        if self.noisy:
+
+            for b in range(self.building_count):
+
+                noisy_data = get_perturbed_data(type='eval')
+
+                self.eval_env.buildings[b].energy_simulation._non_shiftable_load = noisy_data['non_shiftable_load'][b]
+                self.eval_env.buildings[b].energy_simulation._solar_generation = noisy_data['solar_generation'][b]
+
+                self.eval_env.buildings[b].weather._outdoor_dry_bulb_temperature = noisy_data['outdoor_dry_bulb_temperature'][b]
+                self.eval_env.buildings[b].weather._outdoor_relative_humidity = noisy_data['outdoor_relative_humidity'][b]
+
         # Add encoding if enabled
 
         if self.personalization:
@@ -335,6 +376,8 @@ class TRPO:
                 self.periodic_encoder * state[i][0],
                 self.train_running_state[i](state[i][1:])
             )) for i in range(self.building_count)]
+
+        ### END OF SECTION ###
 
         while not done:
 
@@ -439,10 +482,11 @@ def parse_args():
     parser.add_argument('--wandb-log', default=False, action='store_true', help='Log to wandb (default: True)')
     parser.add_argument('--device', type=str, default=None, help='device (default: None)')
     parser.add_argument('--n_episodes', type=int, default=1500, help='Number of episodes (default: 1500)')
-    parser.add_argument('--dataset', type=str, default='citylearn_challenge_2022_phase_all', help='Dataset name (default: citylearn_challenge_2022_phase_all)')
     parser.add_argument('--day-count', type=int, default=1, help='Number of days for training (default: 1)')
     parser.add_argument('--n_buildings', type=int, default=1, help='Number of buildings to train (default: 1)')
     parser.add_argument('--building_id', type=int, default=1, help='Trained building (if individual building training)')
+    parser.add_argument('--data-path', type=str, default='./data/simple_data/', help='Data path (default: ./data/simple_data)')
+    parser.add_argument('--noisy_training', default=False, action='store_true', help='Noisy training (default: False)')
 
     args = parser.parse_args()
 
@@ -494,27 +538,38 @@ if __name__ == "__main__":
 
     # Configure Environment
 
-    if args.training_type != 'individual':
+    schema_filepath = args.data_path + 'schema.json'
 
-        # select buildings
-        buildings = select_buildings(args.dataset, args.n_buildings, 0) # Fix seed to maintain building selection among different seeds for the models
+    with open(schema_filepath) as json_file:
+        schema_dict = json.load(json_file)
 
-    else:
+    if args.training_type != 'fl-personalized':
 
-        # select buildings
-        buildings = [f'Building_{args.building_id}']
+        schema_dict["personalization"] = False
 
-        print(f"Individual Training for building {buildings[0]}")
+    if args.training_type == 'upperbound' or args.training_type == 'individual':
 
-    # select days
-    simulation_start_time_step, simulation_end_time_step = select_simulation_period(args.dataset, args.day_count, 0) # Fix seed to maintain simulation period among different seeds for the models
+        for b_i, b_name in enumerate(schema_dict["buildings"]):
+            
+            if b_i != args.building_id:
 
-    # initialize environment
+                schema_dict["buildings"][b_name]["include"] = False
 
+    # Select days
+    simulation_start_time_step, simulation_end_time_step = select_simulation_period('citylearn_challenge_2022_phase_all', args.day_count, 0) # Fix seed to maintain simulation period among different seeds for the models
+
+    # Environment initialization, we create two different to not affect the episode tracker
+                
     train_env = CityLearnEnv(
-        args.dataset,
-        central_agent=False,
-        buildings=buildings,
+        schema=schema_dict,
+        active_observations=ACTIVE_OBSERVATIONS,
+        simulation_start_time_step=simulation_start_time_step,
+        simulation_end_time_step=simulation_end_time_step,
+        reward_function=NetElectricity,
+        random_seed=args.seed
+    )
+    eval_env = CityLearnEnv(
+        schema=schema_dict,
         active_observations=ACTIVE_OBSERVATIONS,
         simulation_start_time_step=simulation_start_time_step,
         simulation_end_time_step=simulation_end_time_step,
@@ -522,25 +577,11 @@ if __name__ == "__main__":
         random_seed=args.seed
     )
 
-    # select days for evaluation
-
-    simulation_start_time_step, simulation_end_time_step = select_simulation_period(args.dataset, args.day_count, 1) # Fix seed to maintain simulation period among different seeds for the models
-
-    eval_env = CityLearnEnv(
-        args.dataset,
-        central_agent=False,
-        buildings=buildings,
-        active_observations=ACTIVE_OBSERVATIONS,
-        simulation_start_time_step=simulation_start_time_step,
-        simulation_end_time_step=simulation_end_time_step,
-        reward_function=NetElectricity
-    )
-
     # TRPO initialization
 
     trpo = TRPO(
         train_env, eval_env, device, args.gamma, args.tau, args.l2_reg, args.max_kl, args.damping, args.seed, args.batch_size,
-        args.log_interval, args.wandb_log, args.training_type
+        args.log_interval, args.wandb_log, args.training_type, args.noisy_training
     )
 
     # Training
