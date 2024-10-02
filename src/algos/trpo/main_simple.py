@@ -258,7 +258,7 @@ class TRPO:
 
                         # Before doing the next state compute penalization for trying to use more energy than what's available in the battery
 
-                        storage_pen = [(action[b] - self.train_env.buildings[b].electrical_storage.soc) ** 2 for b in range(self.building_count)]
+                        storage_pen = [(action[b] - self.train_env.buildings[b].electrical_storage.soc[self.train_env.time_step]) ** 2 for b in range(self.building_count)]
     
                         # Compute next step
 
