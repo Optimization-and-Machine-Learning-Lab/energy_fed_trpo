@@ -304,14 +304,14 @@ class TRPO:
                         train_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
                         train_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
 
-                        eval_log = self.evaluation()
+                    eval_log = self.evaluation()
 
-                        write_log(log_path=self.logs_path, log={'Episode': i_episode, **train_log, **eval_log})                    
-                        pbar.set_postfix({'Episode': i_episode, **train_log, **eval_log})
+                    write_log(log_path=self.logs_path, log={'Episode': i_episode, **train_log, **eval_log})                    
+                    pbar.set_postfix({'Episode': i_episode, **train_log, **eval_log})
 
-                        if self.wandb_log:
+                    if self.wandb_log:
 
-                            wandb.log({**train_log, **eval_log}, step = int(wandb_step))
+                        wandb.log({**train_log, **eval_log}, step = int(wandb_step))
 
                 # Update pbar
 
@@ -475,7 +475,7 @@ if __name__ == "__main__":
     if args.wandb_log:
 
         run =  wandb.init(
-            name=f"{args.training_type}_seed_{args.seed}_{str(int(time()))}", 
+            name=f"{args.training_type}{'' if 'fl' in args.training_type else f'_b_{args.building_no}'}_seed_{args.seed}_{str(int(time()))}", 
             project="trpo_rl_energy",
             entity="optimllab",
             config={

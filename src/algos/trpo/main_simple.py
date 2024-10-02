@@ -32,7 +32,7 @@ class TRPO:
     def __init__(
         self, train_env : CityLearnEnv, eval_env : CityLearnEnv, device='cpu', gamma : float = 0.995, tau : float = 0.97, l2_reg : float = 1e-3, 
         max_kl : float = 1e-2, damping : float = 1e-1, seed : int = 1, batch_size : int = 15000, log_interval : int = 1, wandb_log : bool = False,
-        training_type : dict = 'fl', noisy : bool = False
+        training_type : str = 'fl', noisy : bool = False
     ):
 
         self.device = device
@@ -75,7 +75,7 @@ class TRPO:
 
         # Define a path to create logs
 
-        self.logs_path = wandb.run.dir if self.wandb_log else f"./logs/trpo_seed_{self.seed}_n_inputs_{self.num_inputs}_t_{str(int(time()))}"
+        self.logs_path = wandb.run.dir if wandb.run is not None else f"./logs/trpo_seed_{self.seed}_n_inputs_{self.num_inputs}_t_{str(int(time()))}"
         Path(self.logs_path).mkdir(exist_ok=True)
 
         # Define running states
@@ -202,6 +202,9 @@ class TRPO:
                 num_steps = 0
                 memories = [Memory() for _ in range(self.building_count)]
 
+                reward_batch = np.array([0.] * self.building_count)
+                emission_batch = np.array([0.] * self.building_count)
+
                 # Increment the pre-training index when num_episodes // self.building_count timesteps passed
                 
                 if pre_training_episodes != 0:
@@ -244,12 +247,25 @@ class TRPO:
 
                     ### END OF SECTION ###
 
+                    reward_sum = np.array([0.] * self.building_count)
+                    emission_sum = np.array([0.] * self.building_count)
+
                     done = False
 
                     while not done:
 
                         action = [self.select_action(state[b]).detach().cpu().numpy() for b in range(self.building_count)]
+
+                        # Before doing the next state compute penalization for trying to use more energy than what's available in the battery
+
+                        storage_pen = [(action[b] - self.train_env.buildings[b].electrical_storage.soc) ** 2 for b in range(self.building_count)]
+    
+                        # Compute next step
+
                         next_state, reward, done, _, _ = self.train_env.step(action)
+
+                        reward_sum += reward
+                        emission_sum += np.sum([self.train_env.buildings[b].net_electricity_consumption[-1] for b in range(self.building_count)]) * next_state[0][-1]
 
                         ### THIS LOGIC IS ADDED HERE TO AVOID MODIFYING THE STANDARD ENVIRONMENT ###
 
@@ -271,17 +287,18 @@ class TRPO:
 
                         for b in range(self.building_count):
 
-                            # Add a penalization for trying to use more energy than what's available in the battery
+                            # Add a storage misuse penalization to reward value in buffer
 
-                            storage_pen = (action[b] - self.train_env.buildings[b].electrical_storage.electricity_consumption[-1]) ** 2
-
-                            memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b] - storage_pen)
+                            memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b] - storage_pen[b])
 
                         state = next_state
                         num_steps += 1
 
                 num_episodes += 1
                 
+                reward_batch += reward_sum
+                emission_batch += emission_sum
+
                 # Perform TRPO update
 
                 batch = []
@@ -297,13 +314,13 @@ class TRPO:
                 batch = self.transition(*zip(*batch))
                 self.update_params(batch)                
 
-                rewards = np.array(pd.DataFrame(self.train_env.unwrapped.episode_rewards)['sum'].tolist())
+                # rewards = np.array(pd.DataFrame(self.train_env.unwrapped.episode_rewards)['sum'].tolist())
 
                 if i_episode % self.log_interval == 0:
 
                     # Logging for current episode
                     
-                    kpis = get_kpis(self.train_env).reset_index()
+                    # kpis = get_kpis(self.train_env).reset_index()
                     
                     train_log = {}
 
@@ -311,11 +328,11 @@ class TRPO:
 
                     #District level logging
 
-                    train_log["train/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
-                    train_log["train/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
-                    train_log["train/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
-                    train_log["train/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
-                    train_log["train/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
+                    # train_log["train/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
+                    # train_log["train/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
+                    # train_log["train/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
+                    # train_log["train/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
+                    # train_log["train/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
 
                     # Building level sampling and logging
 
@@ -323,28 +340,40 @@ class TRPO:
 
                         # For logging
 
-                        base_name = f"train/b_{b+1}_"
+                        # base_name = f"train/b_{b+1}_"
+
+                        reward_batch[b] /= num_episodes
+
+                        base_name = f"train/b_{self.train_env.buildings[b].name[-1]}_"
+
+                        train_log[f"{base_name}reward_avg"] = reward_sum[b]/24
+                        train_log[f"{base_name}emission_avg"] = emission_sum[b]/24
+                        train_log[f"{base_name}reward_batch_avg"] = reward_batch[b]/24
+                        train_log[f"{base_name}emission_batch_avg"] = emission_batch[b]/24
 
                         # Searching by index works as after grouping the District metric goes last
 
-                        train_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-                        train_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
-                        train_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
+                        # train_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
+                        # train_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
+                        # train_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
 
-                        eval_log = self.evaluation()
+                    eval_log = self.evaluation()
 
-                        write_log(log_path=self.logs_path, log={'Episode': i_episode, **train_log, **eval_log})                    
-                        pbar.set_postfix({'Episode': i_episode, **train_log, **eval_log})
+                    write_log(log_path=self.logs_path, log={'Episode': i_episode, **train_log, **eval_log})                    
+                    pbar.set_postfix({'Episode': i_episode, **train_log, **eval_log})
 
-                        if self.wandb_log:
+                    if self.wandb_log:
 
-                            wandb.log({**train_log, **eval_log}, step = int(wandb_step))
+                        wandb.log({**train_log, **eval_log}, step = int(wandb_step))
 
                 # Update pbar
 
                 pbar.update(1)
 
     def evaluation(self):
+
+        eval_reward = np.array([0.] * self.building_count)
+        eval_emission = np.array([0.] * self.building_count)
 
         done = False
         state, _ = self.eval_env.reset()
@@ -382,7 +411,10 @@ class TRPO:
         while not done:
 
             action = [self.select_action(state[b], eval=True).detach().cpu().numpy() for b in range(self.building_count)]
-            next_state, _, done, _, _ = self.eval_env.step(action)
+            next_state, reward, done, _, _ = self.eval_env.step(action)
+
+            eval_reward += reward
+            eval_emission += np.sum([self.eval_env.buildings[b].net_electricity_consumption[-1] for b in range(self.building_count)]) * next_state[0][-1]
 
             if self.personalization:
                 state = [np.concatenate((
@@ -400,26 +432,31 @@ class TRPO:
 
         eval_log = {}
 
-        kpis = get_kpis(self.eval_env)
-        rewards = np.array(pd.DataFrame(self.eval_env.unwrapped.episode_rewards)['sum'].tolist())
+        # kpis = get_kpis(self.eval_env)
+        # rewards = np.array(pd.DataFrame(self.eval_env.unwrapped.episode_rewards)['sum'].tolist())
 
         #District level logging
 
-        eval_log["eval/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
-        eval_log["eval/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
-        eval_log["eval/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
-        eval_log["eval/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
-        eval_log["eval/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
+        # eval_log["eval/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
+        # eval_log["eval/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
+        # eval_log["eval/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
+        # eval_log["eval/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
+        # eval_log["eval/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
 
         # Building level sampling and logging
 
         for b in range(self.building_count):
 
-            base_name = f"eval/b_{b+1}_"
+            # base_name = f"eval/b_{b+1}_"
 
-            eval_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-            eval_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b + 1]
-            eval_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b + 1]
+            # eval_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
+            # eval_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b + 1]
+            # eval_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b + 1]
+
+            base_name = f"eval/b_{self.eval_env.buildings[b].name[-1]}_"
+
+            eval_log[f"{base_name}reward_avg"] = eval_reward[b]/24
+            eval_log[f"{base_name}emission_avg"] = eval_emission[b]/24
 
         return eval_log
 
@@ -519,7 +556,7 @@ if __name__ == "__main__":
     if args.wandb_log:
 
         run =  wandb.init(
-            name=f"{args.training_type}_seed_{args.seed}_{str(int(time()))}", 
+            name=f"{args.training_type}{'' if 'fl' in args.training_type else f'_b_{args.building_id}'}_seed_{args.seed}_{str(int(time()))}",  
             project="trpo_rl_energy",
             entity="optimllab",
             config={

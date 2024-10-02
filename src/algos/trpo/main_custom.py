@@ -395,7 +395,7 @@ if __name__ == "__main__":
     if args.wandb_log:
 
         run = wandb.init(
-            name=f"{args.training_type}{'' if 'fl' in args.training_type else ''}_seed_{args.seed}_{str(int(time()))}", 
+            name=f"{args.training_type}{'' if 'fl' in args.training_type else f'_b_{args.building_no}'}_seed_{args.seed}_{str(int(time()))}", 
             project="trpo_rl_energy",
             entity="optimllab",
             config={

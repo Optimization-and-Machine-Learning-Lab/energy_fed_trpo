@@ -7,6 +7,7 @@ import pandas as pd
 
 from pathlib import Path
 from citylearn.data import DataSet
+from src.utils.utils import set_seed
 
 # Bases used to generate simple data for the buildings
 
@@ -53,10 +54,17 @@ WEATHER_RANDOMNESS = {
     }
 }
 
+# OTHER_PARAMETERS = {
+#     "ac_eff": [1, 1.2, 2.1, 0.9, 1.2],
+#     "solar_eff": [1, 1.2, 0.5, 0.8, 1.2],
+#     "solar_escale": [0.6, 0.5, 0.5, 0.9, 0.5],
+#     "solar_incercept": [350, 368, 320, 290, 400],
+# }
+
 OTHER_PARAMETERS = {
-    "ac_eff": [1, 1.2, 2.1, 0.9, 1.2],
-    "solar_eff": [1, 1.2, 0.5, 0.8, 1.2],
-    "solar_escale": [0.6, 0.5, 0.5, 0.9, 0.5],
+    "ac_eff": [3, 2, 4, 5, 2],
+    "solar_eff": [3, 5, 2, 2.5, 5],
+    "solar_escale": [1, 2, 1.5, 0.8, 0.5],
     "solar_incercept": [350, 368, 320, 290, 400],
 }
 
@@ -90,7 +98,7 @@ def generate_hour_load(efficiency, weather_data):      # extra power for ac and 
     if hum > 60:
         hum_load = (hum - 60) / 20 / efficiency
     else:
-        hum_load = 0
+        hum_load = hum / 20 / efficiency
 
     if temp > 25:
         temp_load = temp / 25 / efficiency
@@ -274,3 +282,11 @@ def get_perturbed_data(source_folder: str = 'data/simple_data/', type: str = 'tr
     # Return new data
 
     return new_data
+
+if __name__ == '__main__':
+
+    set_seed(0)
+
+    # Generate simple data
+
+    generate_simplified_data()
