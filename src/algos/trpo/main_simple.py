@@ -1,7 +1,9 @@
+from copy import deepcopy
 import wandb
 import torch
 import json
 import argparse
+import random 
 import numpy as np
 import scipy.optimize
 
@@ -20,7 +22,6 @@ from src.algos.trpo.trpo import *
 from src.utils.cl_rewards import *
 from src.algos.trpo.models import *
 from src.utils.cl_env_helper import *
-from src.utils.cl_generate_data import get_perturbed_data
 
 ACTIVE_OBSERVATIONS = [
     'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
@@ -30,15 +31,14 @@ ACTIVE_OBSERVATIONS = [
 class TRPO:
 
     def __init__(
-        self, train_env : CityLearnEnv, eval_env : CityLearnEnv, device='cpu', gamma : float = 0.995, tau : float = 0.97, l2_reg : float = 1e-3, 
+        self, env_config : dict, device='cpu', gamma : float = 0.995, tau : float = 0.97, l2_reg : float = 1e-3, 
         max_kl : float = 1e-2, damping : float = 1e-1, seed : int = 1, batch_size : int = 15000, log_interval : int = 1, wandb_log : bool = False,
         training_type : str = 'fl', noisy : bool = False
     ):
 
         self.device = device
        
-        self.train_env = train_env
-        self.eval_env = eval_env
+        self.env_config = env_config
         self.gamma = gamma
         self.tau = tau
         self.l2_reg = l2_reg
@@ -48,14 +48,19 @@ class TRPO:
         self.batch_size = batch_size
         self.log_interval = log_interval
         self.wandb_log = wandb_log
+        self.training_type = training_type
         self.personalization = training_type == 'fl-personalized'
         self.noisy = noisy
 
+        # Initialize evaluation environment (this will be fixed troughout the training)
+
+        self.eval_env = self.get_env_from_config(seed=2500)
+
         # Extract environments characteristics
 
-        self.num_inputs = train_env.observation_space[0].shape[0] + 1 # We add one extra input from the time encoding (periodic)
-        self.num_actions = train_env.action_space[0].shape[0]
-        self.building_count = len(train_env.buildings)
+        self.num_inputs = self.eval_env.observation_space[0].shape[0] + 1 # We add one extra input from the time encoding (periodic)
+        self.num_actions = self.eval_env.action_space[0].shape[0]
+        self.building_count = len(self.eval_env.buildings)
 
         if self.personalization:
 
@@ -93,6 +98,24 @@ class TRPO:
             
         self.transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
 
+    def get_env_from_config(self, seed : int = None):
+
+        seed = seed if seed is not None else random.randint(2000, 2500)
+
+        # Fix seed to maintain simulation period among different seeds for the models
+
+        simulation_start_time_step, simulation_end_time_step = select_simulation_period(
+            dataset_name='citylearn_challenge_2022_phase_all', count=self.env_config['day_count'], seed=seed
+        ) 
+
+        return CityLearnEnv(
+            schema=self.env_config["schema"],
+            active_observations=self.env_config["active_observations"],
+            simulation_start_time_step=simulation_start_time_step,
+            simulation_end_time_step=simulation_end_time_step,
+            reward_function=self.env_config["reward_function"],
+            random_seed=self.env_config["random_seed"]
+        )
 
     def select_action(self, state, eval : bool = False):
 
@@ -197,13 +220,16 @@ class TRPO:
 
         with tqdm(total = total_episodes, nrows=10) as pbar:
 
-            for i_episode in range(num_episodes):
+            for i_episode in range(total_episodes):
 
-                num_steps = 0
                 memories = [Memory() for _ in range(self.building_count)]
 
                 reward_batch = np.array([0.] * self.building_count)
                 emission_batch = np.array([0.] * self.building_count)
+
+                if self.noisy or i_episode == 0:
+                    
+                    self.train_env = self.get_env_from_config(seed=i_episode) if self.training_type != 'upperbound' else deepcopy(self.eval_env)
 
                 # Increment the pre-training index when num_episodes // self.building_count timesteps passed
                 
@@ -211,25 +237,9 @@ class TRPO:
 
                     pre_training_idx = i_episode // (pre_training_episodes // self.building_count)
 
-                while num_steps < self.batch_size:
+                for _ in range(self.batch_size):
 
                     state, _ = self.train_env.reset()
-
-                    ### THIS LOGIC IS ADDED HERE TO AVOID MODIFYING THE STANDARD ENVIRONMENT ###
-
-                    # If noise is enabled, replace the environment time series with a noisy version
-
-                    if self.noisy:
-
-                        noisy_data = get_perturbed_data()
-
-                        for b in range(self.building_count):
-
-                            self.train_env.buildings[b].energy_simulation._non_shiftable_load = noisy_data['non_shiftable_load'][b]
-                            self.train_env.buildings[b].energy_simulation._solar_generation = noisy_data['solar_generation'][b]
-
-                            self.train_env.buildings[b].weather._outdoor_dry_bulb_temperature = noisy_data['outdoor_dry_bulb_temperature'][b]
-                            self.train_env.buildings[b].weather._outdoor_relative_humidity = noisy_data['outdoor_relative_humidity'][b] 
 
                     # Add encoding if enabled
 
@@ -251,6 +261,8 @@ class TRPO:
                     emission_sum = np.array([0.] * self.building_count)
 
                     done = False
+                    
+                    count = 0
 
                     while not done:
 
@@ -258,14 +270,16 @@ class TRPO:
 
                         # Before doing the next state compute penalization for trying to use more energy than what's available in the battery
 
-                        storage_pen = [(action[b] - self.train_env.buildings[b].electrical_storage.soc[self.train_env.time_step]) ** 2 for b in range(self.building_count)]
+                        # storage_pen = [(action[b] - self.train_env.buildings[b].electrical_storage.soc[self.train_env.time_step]) ** 2 for b in range(self.building_count)]
+                        # storage_pen = [(action[b] - self.train_env.buildings[b].electrical_storage.soc[-1]) ** 2 for b in range(self.building_count)]
     
                         # Compute next step
 
                         next_state, reward, done, _, _ = self.train_env.step(action)
 
+                        count += 1
                         reward_sum += reward
-                        emission_sum += np.sum([self.train_env.buildings[b].net_electricity_consumption[-1] for b in range(self.building_count)]) * next_state[0][-1]
+                        emission_sum += np.sum([max(0, self.train_env.buildings[b].net_electricity_consumption[-1]) for b in range(self.building_count)]) * next_state[0][3]
 
                         ### THIS LOGIC IS ADDED HERE TO AVOID MODIFYING THE STANDARD ENVIRONMENT ###
 
@@ -289,15 +303,13 @@ class TRPO:
 
                             # Add a storage misuse penalization to reward value in buffer
 
-                            memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b] - storage_pen[b])
+                            # memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b] - storage_pen[b])
+                            memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b])
 
                         state = next_state
-                        num_steps += 1
 
-                num_episodes += 1
-                
-                reward_batch += reward_sum
-                emission_batch += emission_sum
+                    reward_batch += reward_sum
+                    emission_batch += emission_sum
 
                 # Perform TRPO update
 
@@ -313,6 +325,8 @@ class TRPO:
 
                 batch = self.transition(*zip(*batch))
                 self.update_params(batch)                
+
+                # Logging
 
                 # rewards = np.array(pd.DataFrame(self.train_env.unwrapped.episode_rewards)['sum'].tolist())
 
@@ -342,14 +356,13 @@ class TRPO:
 
                         # base_name = f"train/b_{b+1}_"
 
-                        reward_batch[b] /= num_episodes
+                        reward_batch[b] /= self.batch_size
+                        emission_batch[b] /= self.batch_size
 
                         base_name = f"train/b_{self.train_env.buildings[b].name[-1]}_"
 
-                        train_log[f"{base_name}reward_avg"] = reward_sum[b]/24
-                        train_log[f"{base_name}emission_avg"] = emission_sum[b]/24
-                        train_log[f"{base_name}reward_batch_avg"] = reward_batch[b]/24
-                        train_log[f"{base_name}emission_batch_avg"] = emission_batch[b]/24
+                        train_log[f"{base_name}mean_reward"] = reward_batch[b]/24
+                        train_log[f"{base_name}mean_emission"] = emission_batch[b]/24
 
                         # Searching by index works as after grouping the District metric goes last
 
@@ -378,20 +391,6 @@ class TRPO:
         done = False
         state, _ = self.eval_env.reset()
 
-        ### THIS LOGIC IS ADDED HERE TO AVOID MODIFYING THE STANDARD ENVIRONMENT ###
-
-        if self.noisy:
-
-            for b in range(self.building_count):
-
-                noisy_data = get_perturbed_data(type='eval')
-
-                self.eval_env.buildings[b].energy_simulation._non_shiftable_load = noisy_data['non_shiftable_load'][b]
-                self.eval_env.buildings[b].energy_simulation._solar_generation = noisy_data['solar_generation'][b]
-
-                self.eval_env.buildings[b].weather._outdoor_dry_bulb_temperature = noisy_data['outdoor_dry_bulb_temperature'][b]
-                self.eval_env.buildings[b].weather._outdoor_relative_humidity = noisy_data['outdoor_relative_humidity'][b]
-
         # Add encoding if enabled
 
         if self.personalization:
@@ -414,7 +413,7 @@ class TRPO:
             next_state, reward, done, _, _ = self.eval_env.step(action)
 
             eval_reward += reward
-            eval_emission += np.sum([self.eval_env.buildings[b].net_electricity_consumption[-1] for b in range(self.building_count)]) * next_state[0][-1]
+            eval_emission += np.sum([max(0, self.eval_env.buildings[b].net_electricity_consumption[-1]) for b in range(self.building_count)]) * next_state[0][3]
 
             if self.personalization:
                 state = [np.concatenate((
@@ -455,8 +454,8 @@ class TRPO:
 
             base_name = f"eval/b_{self.eval_env.buildings[b].name[-1]}_"
 
-            eval_log[f"{base_name}reward_avg"] = eval_reward[b]/24
-            eval_log[f"{base_name}emission_avg"] = eval_emission[b]/24
+            eval_log[f"{base_name}mean_reward"] = eval_reward[b]/24
+            eval_log[f"{base_name}mean_emission"] = eval_emission[b]/24
 
         return eval_log
 
@@ -475,6 +474,8 @@ class TRPO:
 
 
 def init_config():
+
+    torch.set_num_threads(10)
 
     # Make sure logs folder exists
 
@@ -556,7 +557,7 @@ if __name__ == "__main__":
     if args.wandb_log:
 
         run =  wandb.init(
-            name=f"{args.training_type}{'' if 'fl' in args.training_type else f'_b_{args.building_id}'}_seed_{args.seed}_{str(int(time()))}",  
+            name=f"{args.training_type}{'' if 'fl' in args.training_type else f'_b_{args.building_id}'}_seed_{args.seed}",  
             project="trpo_rl_energy",
             entity="optimllab",
             config={
@@ -592,32 +593,21 @@ if __name__ == "__main__":
 
                 schema_dict["buildings"][b_name]["include"] = False
 
-    # Select days
-    simulation_start_time_step, simulation_end_time_step = select_simulation_period('citylearn_challenge_2022_phase_all', args.day_count, 0) # Fix seed to maintain simulation period among different seeds for the models
-
     # Environment initialization, we create two different to not affect the episode tracker
                 
-    train_env = CityLearnEnv(
-        schema=schema_dict,
-        active_observations=ACTIVE_OBSERVATIONS,
-        simulation_start_time_step=simulation_start_time_step,
-        simulation_end_time_step=simulation_end_time_step,
-        reward_function=NetElectricity,
-        random_seed=args.seed
-    )
-    eval_env = CityLearnEnv(
-        schema=schema_dict,
-        active_observations=ACTIVE_OBSERVATIONS,
-        simulation_start_time_step=simulation_start_time_step,
-        simulation_end_time_step=simulation_end_time_step,
-        reward_function=NetElectricity,
-        random_seed=args.seed
-    )
+    env_config = {
+        "schema": schema_dict,
+        "active_observations": ACTIVE_OBSERVATIONS,
+        "reward_function": ElectricityCostWithPenalization,
+        # "reward_function": NetElectricity,
+        "random_seed": args.seed,
+        "day_count": args.day_count,
+    }
 
     # TRPO initialization
 
     trpo = TRPO(
-        train_env, eval_env, device, args.gamma, args.tau, args.l2_reg, args.max_kl, args.damping, args.seed, args.batch_size,
+        env_config, device, args.gamma, args.tau, args.l2_reg, args.max_kl, args.damping, args.seed, args.batch_size,
         args.log_interval, args.wandb_log, args.training_type, args.noisy_training
     )
 

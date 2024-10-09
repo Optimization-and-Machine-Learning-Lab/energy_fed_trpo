@@ -125,6 +125,7 @@ class NetElectricity(RewardFunction):
 
         for o, m in zip(observations, self.env_metadata['buildings']):
 
+            # battery_action = o['electrical_storage_electricity_consumption'] / m['electrical_storage']['capacity']
             cost = -(o['net_electricity_consumption'] * o['electricity_pricing'])
             reward = cost.clip(max=0)
 

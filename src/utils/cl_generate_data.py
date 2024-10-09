@@ -11,6 +11,8 @@ from src.utils.utils import set_seed
 
 # Bases used to generate simple data for the buildings
 
+DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
 MONTHLY_MEAN_TEMP = [
     [0, 1.9, 6.2, 11.5, 15.9, 19.8, 21.8, 21.5, 16.5, 10.9, 5.6, 1],
     [1, 4, 10, 16, 21, 25, 27, 25, 21, 15, 8, 2],
@@ -45,30 +47,36 @@ SOLAR_DAY_CHANGE = [
 
 WEATHER_RANDOMNESS = {
     "training": {
-        "temperature": {"low": 15, "high": 20},
-        "humidity": {"low": 0, "high": 50},
+        "temperature": {"mu": 0, "sigma": 5},
+        "humidity": {"mu": 0, "sigma": 5},
     },
     "eval": {
-        "temperature": {"low": 23.5, "high": 23.5001},
-        "humidity": {"low": 53.5, "high": 53.5001},
+        "temperature": {"mu": 0, "sigma": 5},
+        "humidity": {"mu": 0, "sigma": 5},
     }
 }
 
-# OTHER_PARAMETERS = {
-#     "ac_eff": [1, 1.2, 2.1, 0.9, 1.2],
-#     "solar_eff": [1, 1.2, 0.5, 0.8, 1.2],
-#     "solar_escale": [0.6, 0.5, 0.5, 0.9, 0.5],
-#     "solar_incercept": [350, 368, 320, 290, 400],
-# }
-
 OTHER_PARAMETERS = {
-    "ac_eff": [3, 2, 4, 5, 2],
-    "solar_eff": [3, 5, 2, 2.5, 5],
-    "solar_escale": [1, 2, 1.5, 0.8, 0.5],
+    "ac_eff": [1, 1.2, 2.1, 0.9, 1.2],
+    "solar_eff": [1, 1.2, 0.5, 0.8, 1.2],
+    "solar_escale": [0.6, 0.5, 0.5, 0.9, 0.5],
     "solar_incercept": [350, 368, 320, 290, 400],
 }
 
 # Useful function definitions
+
+def shift_and_append(df, n):
+
+    # Shift the DataFrame by n positions (downward)
+    shifted_df = df.shift(n)
+    
+    # Collect the dropped values (the last n rows before the shift)
+    dropped_values = df.iloc[-n:].reset_index(drop=True)
+    
+    # Replace the first n rows (now NaN) with the dropped values
+    shifted_df.iloc[:n] = dropped_values.values
+    
+    return shifted_df
 
 def generate_day_temperature(month, month_day, b):
 
@@ -127,7 +135,7 @@ def generate_simplified_data(base_dataset: str = 'citylearn_challenge_2022_phase
 
     schema['buildings'] = {f'Building_{i}': schema['buildings'][f'Building_{i}'] for i in range(1, 6)}
 
-    # Extract the base weather, emissions and pricing data (doesn't change among buildings)
+    # Extract the base weather, emissions and pricing data
 
     base_weather = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['weather']))
     base_pricing = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['pricing']))
@@ -253,8 +261,11 @@ def get_perturbed_data(source_folder: str = 'data/simple_data/', type: str = 'tr
 
         weather_randomness = WEATHER_RANDOMNESS[type]
 
-        delta_temp = np.random.uniform(weather_randomness['temperature']['low'], weather_randomness['temperature']['high'], data_length)
-        delta_hum = np.random.uniform(weather_randomness['humidity']['low'], weather_randomness['humidity']['high'], data_length)
+        # delta_temp = np.random.uniform(weather_randomness['temperature']['low'], weather_randomness['temperature']['high'], data_length)
+        # delta_hum = np.random.uniform(weather_randomness['humidity']['low'], weather_randomness['humidity']['high'], data_length)
+
+        delta_temp = np.random.normal(weather_randomness['temperature']['mu'], weather_randomness['temperature']['sigma'], data_length)
+        delta_hum = np.random.normal(weather_randomness['humidity']['mu'], weather_randomness['humidity']['sigma'], data_length)
 
         # Update temperature and humidity data
 
@@ -270,7 +281,7 @@ def get_perturbed_data(source_folder: str = 'data/simple_data/', type: str = 'tr
         base_solar = base_csv['solar_generation'].to_numpy()
 
         non_shiftable_load = (humidity - 60) / 20 / OTHER_PARAMETERS['ac_eff'][building_no] + (temperature - 25) / 25 / OTHER_PARAMETERS['ac_eff'][building_no] + base_load
-        solar_generation = (OTHER_PARAMETERS['solar_incercept'][building_no] + temperature * OTHER_PARAMETERS['solar_eff'][building_no]) * OTHER_PARAMETERS['solar_escale'][building_no] + base_solar
+        solar_generation = (temperature * OTHER_PARAMETERS['solar_eff'][building_no] * OTHER_PARAMETERS['solar_escale'][building_no] ** 2) * base_solar
         
         # Add to dictionary
 
@@ -283,10 +294,140 @@ def get_perturbed_data(source_folder: str = 'data/simple_data/', type: str = 'tr
 
     return new_data
 
+def copy_data_from_ref(ref_dataset: str = 'citylearn_challenge_2022_phase_all', dest_folder: str = 'data/ref_data/'):
+
+    # Make sure the destination folder exists including the subfolders
+
+    Path(dest_folder).mkdir(parents=True, exist_ok=True)
+
+    # Get reference schema
+
+    schema = DataSet.get_schema(ref_dataset)
+
+    # Copy the base weather, emissions and pricing data
+
+    base_weather = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['weather']))
+    base_pricing = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['pricing']))
+    base_emissions = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['carbon_intensity']))
+
+    base_weather.to_csv(os.path.join(dest_folder, 'weather.csv'), index=False)
+    base_pricing.to_csv(os.path.join(dest_folder, 'pricing.csv'), index=False)
+    base_emissions.to_csv(os.path.join(dest_folder, 'carbon_intensity.csv'), index=False)
+
+    # Copy the base building data
+
+    for _, (building_name, info) in enumerate(schema['buildings'].items()):
+
+        base_csv = pd.read_csv(os.path.join(schema['root_directory'], info['energy_simulation']))
+
+        base_csv.to_csv(os.path.join(dest_folder, f'{building_name}.csv'), index=False)
+
+    # Copy the base schema to the destination folder
+
+    with open(os.path.join(schema['root_directory'], 'schema.json'), 'r') as f:
+
+        schema = json.load(f)
+
+        schema['root_directory'] = dest_folder
+
+        with open(os.path.join(dest_folder, 'schema.json'), 'w') as f:
+
+            json.dump(schema, f, indent=4)
+
+def generate_simple_data_from_ref(base_dataset: str = 'citylearn_challenge_2022_phase_all', dest_folder: str = 'data/simple_data/', shift: bool = False):
+
+    # Make sure the destination folder exists including the subfolders
+
+    Path(dest_folder).mkdir(parents=True, exist_ok=True)
+
+    # Get reference schema
+
+    schema = DataSet.get_schema(base_dataset)
+
+    # Reduce the number of buildings to 5
+
+    schema['buildings'] = {f'Building_{i}': schema['buildings'][f'Building_{i}'] for i in range(1, 6)}
+
+    # Extract the base weather, emissions and pricing data (doesn't change among buildings)
+
+    base_weather = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['weather']))
+    base_pricing = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['pricing']))
+    base_emissions = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['carbon_intensity']))
+
+    # Read the base schema and process the json
+
+    for building_no, (building_name, info) in enumerate(schema['buildings'].items()):
+
+        # Create custom building CSVs
+
+        base_csv = pd.read_csv(os.path.join(schema['root_directory'], info['energy_simulation']))
+
+        sigma_load_hourly = 0.01
+        sigma_solar_hourly = 50
+
+        building_data = [[0.] * 2 for _ in range(365 * 24)] # We need just to store the load and generation
+
+        for day in range(365):
+
+            init_step = day * 24
+            end_step = day * 24 + 24
+
+            base_temp = base_weather['outdoor_dry_bulb_temperature'].iloc[init_step:end_step]
+            base_hum = base_weather['outdoor_relative_humidity'][init_step:end_step]
+
+            for hour in range(24):
+
+                curr_hour = init_step + hour
+
+                # Generate simpler data for non_shiftable_load based on humidity and temperature 
+
+                base_load = generate_hour_load(OTHER_PARAMETERS['ac_eff'][building_no], (base_temp[curr_hour], base_hum[curr_hour]))
+                base_solar = get_hour_solar(
+                    base_temp[curr_hour], OTHER_PARAMETERS['solar_incercept'][building_no], OTHER_PARAMETERS['solar_eff'][building_no],
+                    OTHER_PARAMETERS['solar_escale'][building_no]
+                )
+
+                building_data[curr_hour][0] = random.gauss(base_load + LOAD_DAY_CHANGE[building_no][hour], sigma_load_hourly)
+
+                if hour < 6 or hour > 19:
+                    building_data[curr_hour][1] = 0
+                else:
+                    building_data[curr_hour][1] = random.gauss(base_solar + SOLAR_DAY_CHANGE[building_no][hour], sigma_solar_hourly)
+
+        # Update the base csv with the new data
+
+        building_data = np.array(building_data).clip(min=0)
+
+        base_csv['non_shiftable_load'] = building_data[:,0]
+        base_csv['solar_generation'] = building_data[:,1]
+
+        # Shift the data if needed, it's done randomly for each building. by months
+
+        shift_hours = 0 if not shift else sum(DAYS_IN_MONTH[:random.randint(1, 12)] * 24)
+
+        # Save the final CSVs (building and weather) to the destination folder
+
+        shift_and_append(base_csv, shift_hours).to_csv(os.path.join(dest_folder, f'{building_name}.csv'), index=False)
+        shift_and_append(base_weather, shift_hours).to_csv(os.path.join(dest_folder, f'weather_{building_name[-1]}.csv'), index=False)
+
+        # Update the schema with the new paths
+
+        schema['buildings'][building_name]['energy_simulation'] = f'{building_name}.csv'
+        schema['buildings'][building_name]['weather'] = f'weather_{building_name[-1]}.csv'
+
+    # Write pricing and emissions data to the destination folder
+
+    base_pricing.to_csv(os.path.join(dest_folder, 'pricing.csv'), index=False)
+    base_emissions.to_csv(os.path.join(dest_folder, 'carbon_intensity.csv'), index=False)
+
+    # Save the new schema in the destination folder
+
+    schema['root_directory'] = dest_folder
+
+    with open(os.path.join(dest_folder, 'schema.json'), 'w') as f:
+        json.dump(schema, f, indent=4)
+
 if __name__ == '__main__':
 
     set_seed(0)
-
-    # Generate simple data
-
-    generate_simplified_data()
+    generate_simple_data_from_ref(shift=True)
