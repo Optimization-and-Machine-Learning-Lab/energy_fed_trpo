@@ -19,7 +19,7 @@ from src.utils.utils import *
 from replay_memory import Memory
 from running_state import ZFilter
 from src.algos.trpo.trpo import *
-from src.utils.cl_rewards import *
+from src.utils.cl_rewards import CostIneffectiveActionPenalization, CostBadBattUsePenalization
 from src.algos.trpo.models import *
 from src.utils.cl_env_helper import *
 
@@ -27,6 +27,12 @@ ACTIVE_OBSERVATIONS = [
     'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
     'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
 ]
+
+REWARDS = {
+    'cost_pen_no_batt': CostIneffectiveActionPenalization,
+    'cost_pen_bad_batt': CostBadBattUsePenalization,
+    'cost_pen_bad_action': CostIneffectiveActionPenalization,
+}
 
 class TRPO:
 
@@ -225,6 +231,7 @@ class TRPO:
                 memories = [Memory() for _ in range(self.building_count)]
 
                 reward_batch = np.array([0.] * self.building_count)
+                cost_batch = np.array([0.] * self.building_count)
                 emission_batch = np.array([0.] * self.building_count)
 
                 if self.noisy or i_episode == 0:
@@ -257,13 +264,8 @@ class TRPO:
 
                     ### END OF SECTION ###
 
-                    reward_sum = np.array([0.] * self.building_count)
-                    emission_sum = np.array([0.] * self.building_count)
-
                     done = False
                     
-                    count = 0
-
                     while not done:
 
                         action = [self.select_action(state[b]).detach().cpu().numpy() for b in range(self.building_count)]
@@ -275,11 +277,9 @@ class TRPO:
     
                         # Compute next step
 
-                        next_state, reward, done, _, _ = self.train_env.step(action)
+                        self.train_env.reward_function.env_metadata['last_action'] = action # Apend the last action to the reward so it can be considered in its computation
 
-                        count += 1
-                        reward_sum += reward
-                        emission_sum += np.sum([max(0, self.train_env.buildings[b].net_electricity_consumption[-1]) for b in range(self.building_count)]) * next_state[0][3]
+                        next_state, reward, done, _, _ = self.train_env.step(action)
 
                         ### THIS LOGIC IS ADDED HERE TO AVOID MODIFYING THE STANDARD ENVIRONMENT ###
 
@@ -308,8 +308,9 @@ class TRPO:
 
                         state = next_state
 
-                    reward_batch += reward_sum
-                    emission_batch += emission_sum
+                    reward_batch += self.train_env.unwrapped.episode_rewards[-1]['sum']
+                    cost_batch += [sum(self.train_env.buildings[b].net_electricity_consumption_cost) for b in range(self.building_count)]
+                    emission_batch += [sum(self.train_env.buildings[b].net_electricity_consumption_emission) for b in range(self.building_count)]
 
                 # Perform TRPO update
 
@@ -357,11 +358,13 @@ class TRPO:
                         # base_name = f"train/b_{b+1}_"
 
                         reward_batch[b] /= self.batch_size
+                        cost_batch[b] /= self.batch_size
                         emission_batch[b] /= self.batch_size
 
                         base_name = f"train/b_{self.train_env.buildings[b].name[-1]}_"
 
                         train_log[f"{base_name}mean_reward"] = reward_batch[b]/24
+                        train_log[f"{base_name}mean_cost"] = cost_batch[b]/24
                         train_log[f"{base_name}mean_emission"] = emission_batch[b]/24
 
                         # Searching by index works as after grouping the District metric goes last
@@ -385,9 +388,6 @@ class TRPO:
 
     def evaluation(self):
 
-        eval_reward = np.array([0.] * self.building_count)
-        eval_emission = np.array([0.] * self.building_count)
-
         done = False
         state, _ = self.eval_env.reset()
 
@@ -410,10 +410,10 @@ class TRPO:
         while not done:
 
             action = [self.select_action(state[b], eval=True).detach().cpu().numpy() for b in range(self.building_count)]
-            next_state, reward, done, _, _ = self.eval_env.step(action)
 
-            eval_reward += reward
-            eval_emission += np.sum([max(0, self.eval_env.buildings[b].net_electricity_consumption[-1]) for b in range(self.building_count)]) * next_state[0][3]
+            self.eval_env.reward_function.env_metadata['last_action'] = action # Apend the last action to the reward so it can be considered in its computation
+
+            next_state, _, done, _, _ = self.eval_env.step(action)
 
             if self.personalization:
                 state = [np.concatenate((
@@ -427,6 +427,10 @@ class TRPO:
                     self.train_running_state[i](next_state[i][1:])
                 )) for i in range(self.building_count)]
         
+        eval_reward = self.eval_env.unwrapped.episode_rewards[-1]['sum']
+        eval_cost = [sum(self.eval_env.buildings[b].net_electricity_consumption_cost) for b in range(self.building_count)]
+        eval_emission = [sum(self.eval_env.buildings[b].net_electricity_consumption_emission) for b in range(self.building_count)]
+
         # Logging
 
         eval_log = {}
@@ -455,6 +459,7 @@ class TRPO:
             base_name = f"eval/b_{self.eval_env.buildings[b].name[-1]}_"
 
             eval_log[f"{base_name}mean_reward"] = eval_reward[b]/24
+            eval_log[f"{base_name}mean_cost"] = eval_cost[b]/24
             eval_log[f"{base_name}mean_emission"] = eval_emission[b]/24
 
         return eval_log
@@ -525,6 +530,7 @@ def parse_args():
     parser.add_argument('--building_id', type=int, default=1, help='Trained building (if individual building training)')
     parser.add_argument('--data-path', type=str, default='./data/simple_data/', help='Data path (default: ./data/simple_data)')
     parser.add_argument('--noisy_training', default=False, action='store_true', help='Noisy training (default: False)')
+    parser.add_argument('--reward', type=str, default='cost_pen_no_batt', choices={'cost_pen_no_batt', 'cost_pen_bad_batt', 'cost_pen_bad_action'}, help='Reward function (default: cost_pen_no_batt)')
 
     args = parser.parse_args()
 
@@ -570,6 +576,9 @@ if __name__ == "__main__":
                 "max_kl": args.max_kl,
                 "damping": args.damping,
                 "batch_size": args.batch_size,
+                "reward": args.reward,
+                "noisy_training": args.noisy_training,
+                "pre_training_steps": args.pre_training_steps,
             },
             sync_tensorboard=False,
         )
@@ -598,8 +607,7 @@ if __name__ == "__main__":
     env_config = {
         "schema": schema_dict,
         "active_observations": ACTIVE_OBSERVATIONS,
-        "reward_function": ElectricityCostWithPenalization,
-        # "reward_function": NetElectricity,
+        "reward_function": REWARDS[args.reward],
         "random_seed": args.seed,
         "day_count": args.day_count,
     }

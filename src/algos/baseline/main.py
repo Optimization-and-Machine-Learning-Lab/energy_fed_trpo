@@ -8,7 +8,6 @@ from pathlib import Path
 from citylearn.citylearn import CityLearnEnv
 
 from src.utils.utils import *
-from stable_baselines3 import SAC
 from src.utils.cl_rewards import *
 from src.utils.cl_env_helper import *
 
@@ -18,6 +17,12 @@ ACTIVE_OBSERVATIONS = [
     'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
     'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
 ]
+
+REWARDS = {
+    'cost_pen_no_batt': CostIneffectiveActionPenalization,
+    'cost_pen_bad_batt': CostBadBattUsePenalization,
+    'cost_pen_bad_action': CostIneffectiveActionPenalization,
+}
 
 def init_config():
 
@@ -79,6 +84,7 @@ def parse_args():
     parser.add_argument('--log-interval', type=int, default=1, metavar='LI', help='Interval between training status logs (default: 1)')
     parser.add_argument('--day-count', type=int, default=1, help='Number of days for training (default: 1)')
     parser.add_argument('--data-path', type=str, default='./data/simple_data/', help='Data path (default: ./data/simple_data)')
+    parser.add_argument('--reward', type=str, default='cost_pen_no_batt', choices={'cost_pen_no_batt', 'cost_pen_bad_batt', 'cost_pen_bad_action'}, help='Reward function (default: cost_pen_no_batt)')
 
     args = parser.parse_args()
 
@@ -117,6 +123,7 @@ if __name__ == "__main__":
             config={
                 "algorithm": "baseline",
                 "seed": args.seed,
+                "reward": args.reward,
             },
             sync_tensorboard=False,
         )
@@ -133,8 +140,7 @@ if __name__ == "__main__":
     env_config = {
         "schema": schema_dict,
         "active_observations": ACTIVE_OBSERVATIONS,
-        "reward_function": ElectricityCostWithPenalization,
-        # "reward_function": NetElectricity,
+        "reward_function": REWARDS[args.reward],
         "random_seed": args.seed,
         "day_count": args.day_count,
     }
@@ -162,9 +168,6 @@ if __name__ == "__main__":
             
             wandb_step += 1     # count training step
 
-            reward_sum = np.array([0.] * building_count)
-            emission_sum = np.array([0.] * building_count)
-
             # Check kpis for eval environment
 
             observations, _ = eval_env.reset()
@@ -172,11 +175,15 @@ if __name__ == "__main__":
             while not eval_env.unwrapped.terminated:
 
                 actions = model.predict(observations, deterministic=True)
-                observations, reward, _, _, _ = eval_env.step(actions)
 
-                reward_sum += reward
-                emission_sum += np.sum([max(0, eval_env.buildings[b].net_electricity_consumption[-1]) for b in range(building_count)]) * observations[0][3]
+                eval_env.reward_function.env_metadata['last_action'] = np.array([[0] for a in actions]) # Apend the last action to the reward so it can be considered in its computation
+
+                observations, reward, _, _, _ = eval_env.step(actions)
                 
+            reward_sum = eval_env.unwrapped.episode_rewards[-1]['sum']
+            cost_sum = [sum(eval_env.buildings[b].net_electricity_consumption_cost) for b in range(building_count)]
+            emission_sum = [sum(eval_env.buildings[b].net_electricity_consumption_emission) for b in range(building_count)]
+            
             # kpis = get_kpis(eval_env)
 
             eval_log = {}
@@ -208,6 +215,7 @@ if __name__ == "__main__":
                 base_name = f"eval/b_{eval_env.buildings[b].name[-1]}_"
 
                 eval_log[f"{base_name}mean_reward"] = reward_sum[b]/24
+                eval_log[f"{base_name}mean_cost"] = cost_sum[b]/24
                 eval_log[f"{base_name}mean_emission"] = emission_sum[b]/24
 
             if i % args.log_interval == 0:

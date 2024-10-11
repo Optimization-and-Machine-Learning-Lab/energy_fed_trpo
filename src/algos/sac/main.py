@@ -147,7 +147,7 @@ if __name__ == "__main__":
         simulation_start_time_step=simulation_start_time_step,
         simulation_end_time_step=simulation_end_time_step,
         # reward_function=ElectricityCostWithPenalization
-        reward_function=NetElectricity
+        reward_function=CostBadBattUsePenalization
     )
 
     train_env = NormalizedObservationWrapper(train_env)
@@ -167,7 +167,7 @@ if __name__ == "__main__":
         simulation_start_time_step=simulation_start_time_step,
         simulation_end_time_step=simulation_end_time_step,
         # reward_function=ElectricityCostWithPenalization
-        reward_function=NetElectricity
+        reward_function=CostBadBattUsePenalization
     )
 
     eval_env = NormalizedObservationWrapper(eval_env)

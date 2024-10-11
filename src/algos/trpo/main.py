@@ -518,7 +518,7 @@ if __name__ == "__main__":
         active_observations=ACTIVE_OBSERVATIONS,
         simulation_start_time_step=simulation_start_time_step,
         simulation_end_time_step=simulation_end_time_step,
-        reward_function=NetElectricity,
+        reward_function=CostBadBattUsePenalization,
         random_seed=args.seed
     )
 
@@ -533,7 +533,7 @@ if __name__ == "__main__":
         active_observations=ACTIVE_OBSERVATIONS,
         simulation_start_time_step=simulation_start_time_step,
         simulation_end_time_step=simulation_end_time_step,
-        reward_function=NetElectricity
+        reward_function=CostBadBattUsePenalization
     )
 
     # TRPO initialization

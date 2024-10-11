@@ -1,0 +1,26 @@
+name: upperbound
+entity: optimllab
+project: trpo_rl_energy
+program: src/algos/trpo/main_simple.py
+command:
+- ${env}
+- ${interpreter}
+- ${program}
+- ${args}
+- --wandb-log
+method: grid
+metric:
+  goal: maximize
+  name: eval/b_1_mean_reward
+parameters:
+  device:
+    value: cpu
+  training-type:
+    value: upperbound
+  building_id:
+    values: [0,1,2,3,4]
+  batch-size:
+    values: [32]
+  reward:
+    values: ['cost_pen_no_batt', 'cost_pen_bad_batt', 'cost_pen_bad_action']
+  
