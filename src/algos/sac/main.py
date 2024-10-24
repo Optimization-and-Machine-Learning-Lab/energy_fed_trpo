@@ -1,11 +1,14 @@
+import json
+from math import e
 import wandb
 import argparse
 
-from time import time
+from time import time 
 from tqdm import tqdm
 from pathlib import Path
 from citylearn.citylearn import CityLearnEnv
 
+from stable_baselines3.common.noise import NormalActionNoise
 from src.utils.utils import *
 from stable_baselines3 import SAC
 from src.utils.cl_rewards import *
@@ -15,6 +18,19 @@ from citylearn.wrappers import (
     NormalizedObservationWrapper,
     StableBaselines3Wrapper,
 )
+
+ACTIVE_OBSERVATIONS = [
+    'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
+    'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
+]
+
+REWARDS = {
+    'cost': Cost,
+    'weighted_cost_emissions': WeightedCostAndEmissions,
+    'cost_pen_no_batt': CostIneffectiveActionPenalization,
+    'cost_pen_bad_batt': CostBadBattUsePenalization,
+    'cost_pen_bad_action': CostIneffectiveActionPenalization,
+}
 
 def init_config():
 
@@ -44,11 +60,31 @@ def init_config():
 
     return device
 
+def get_env_from_config(config: dict, seed : int = None):
+
+    seed = seed if seed is not None else random.randint(2000, 2500)
+
+    # Fix seed to maintain simulation period among different seeds for the models
+
+    simulation_start_time_step, simulation_end_time_step = select_simulation_period(
+        dataset_name='citylearn_challenge_2022_phase_all', count=config['day_count'], seed=seed
+    ) 
+
+    return CityLearnEnv(
+        schema=config["schema"],
+        active_observations=config["active_observations"],
+        simulation_start_time_step=simulation_start_time_step,
+        simulation_end_time_step=simulation_end_time_step,
+        reward_function=config["reward_function"],
+        random_seed=config["random_seed"],
+        central_agent=config["central_agent"],
+    )
+
 def parse_args():
 
     parser = argparse.ArgumentParser(description='CityLearn TRPO experiment')
 
-    parser.add_argument("--n_episodes", type=int, default=1500)
+    parser.add_argument("--n_episodes", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--learning_rate", type=float, default=5e-4)
     parser.add_argument("--batch_size", type=int, default=256)
@@ -60,7 +96,11 @@ def parse_args():
     parser.add_argument('--wandb-log', default=False, action='store_true', help='Log to wandb (default: True)')
     parser.add_argument('--log-interval', type=int, default=1, metavar='LI', help='Interval between training status logs (default: 1)')
     parser.add_argument('--device', type=str, default=None, help='device (default: None)')
-
+    parser.add_argument('--data-path', type=str, default='./data/simple_data/', help='Data path (default: ./data/simple_data)')
+    parser.add_argument('--reward', type=str, help='Reward function (default: cost_pen_no_batt)')
+    parser.add_argument('--day-count', type=int, default=1, help='Number of days for training (default: 1)')
+    parser.add_argument('--noisy_training', default=False, action='store_true', help='Noisy training (default: False)')
+    
     args = parser.parse_args()
 
     return args
@@ -85,20 +125,23 @@ if __name__ == "__main__":
 
     set_seed(seed=args.seed)
 
-    algorithm_config = {
+    model_config = {
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,
-        "learning_starts": 120,
-        "train_freq": 168,
+        # "learning_starts": 1,
+        "train_freq": (6, 'step'),
         "gamma": args.gamma,
         "tau": args.tau,
         "buffer_size": args.buffer_size,
-        "policy_kwargs": {
-            "net_arch": {
-                "pi": [args.pi_nns, 2 * args.pi_nns],
-                "qf": [args.qf_nns, 2 * args.qf_nns],
-            }
-        },
+        "device": device,
+        "seed": args.seed,
+        # "policy_kwargs": {
+        #     "net_arch": {
+        #         "pi": [args.pi_nns, args.pi_nns],
+        #         "qf": [args.qf_nns, args.qf_nns],
+        #     }
+        # },
+        "action_noise": NormalActionNoise(mean=np.zeros(5), sigma=0.1 * np.ones(5))
     }
 
     # Setup WandB if enabled
@@ -114,62 +157,38 @@ if __name__ == "__main__":
             config={
                 "algorithm": "sac",
                 "seed": args.seed,
-                **algorithm_config
+                **model_config
             },
             sync_tensorboard=False,
         )
 
     # Initialize the environment
+    
     # Configure Environment
 
-    DATASET_NAME = 'citylearn_challenge_2022_phase_all'
-    BUILDING_COUNT = 2
-    DAY_COUNT = 1
-    
-    ACTIVE_OBSERVATIONS = [
-        'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
-        'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
-    ]
+    schema_filepath = args.data_path + 'schema.json'
 
-    # select buildings
-    buildings = select_buildings(DATASET_NAME, BUILDING_COUNT, 0) # Fix seed to maintain building selection among different seeds for the models
+    with open(schema_filepath) as json_file:
+        schema_dict = json.load(json_file)
 
-    # select days
-    simulation_start_time_step, simulation_end_time_step = select_simulation_period(DATASET_NAME, DAY_COUNT, 0) # Fix seed to maintain simulation period among different seeds for the models
+    # Environment initialization, we create two different to not affect the episode tracker
+                
+    env_config = {
+        "schema": schema_dict,
+        "central_agent": True,
+        "active_observations": ACTIVE_OBSERVATIONS,
+        "reward_function": REWARDS[args.reward],
+        "random_seed": args.seed,
+        "day_count": args.day_count,
+    }
 
     # initialize environment
 
-    train_env = CityLearnEnv(
-        DATASET_NAME,
-        central_agent=True,
-        buildings=buildings,
-        active_observations=ACTIVE_OBSERVATIONS,
-        simulation_start_time_step=simulation_start_time_step,
-        simulation_end_time_step=simulation_end_time_step,
-        # reward_function=ElectricityCostWithPenalization
-        reward_function=CostBadBattUsePenalization
-    )
-
+    train_env = get_env_from_config(config=env_config, seed=0)
     train_env = NormalizedObservationWrapper(train_env)
     train_env = StableBaselines3Wrapper(train_env)
 
-    # select buildings
-    buildings = select_buildings(DATASET_NAME, BUILDING_COUNT, 1)  # Fix seed to maintain building selection among different seeds for the models
-
-    # select days
-    simulation_start_time_step, simulation_end_time_step = select_simulation_period(DATASET_NAME, DAY_COUNT, 1) # Fix seed to maintain simulation period among different seeds for the models
-
-    eval_env = CityLearnEnv(
-        DATASET_NAME,
-        central_agent=True,
-        buildings=buildings,
-        active_observations=ACTIVE_OBSERVATIONS,
-        simulation_start_time_step=simulation_start_time_step,
-        simulation_end_time_step=simulation_end_time_step,
-        # reward_function=ElectricityCostWithPenalization
-        reward_function=CostBadBattUsePenalization
-    )
-
+    eval_env = get_env_from_config(config=env_config, seed=2500)
     eval_env = NormalizedObservationWrapper(eval_env)
     eval_env = StableBaselines3Wrapper(eval_env)
 
@@ -179,20 +198,33 @@ if __name__ == "__main__":
     Path(logs_path).mkdir(exist_ok=True)
 
     # Initialize the model
-    model = SAC("MlpPolicy", train_env, **algorithm_config)
+    model = SAC("MlpPolicy", train_env, **model_config)
 
     with tqdm(total=args.n_episodes, nrows=10) as pbar:
 
         wandb_step = 0
 
-        for i in tqdm(range(args.n_episodes)):
+        for i in range(args.n_episodes):
+
+            if args.noisy_training and i > 0:
+                
+                train_env = get_env_from_config(config=env_config, seed=i)
+                train_env = NormalizedObservationWrapper(train_env)
+                train_env = StableBaselines3Wrapper(train_env)
+
+                model = SAC("MlpPolicy", train_env, **model_config)
+                model.load("./models/tmp/sac", env=train_env)
 
             # Train the model
             model.learn(
-                total_timesteps=train_env.unwrapped.time_steps - 1,
+                total_timesteps=(train_env.unwrapped.time_steps - 1), # * 5,
             )
 
-            kpis = get_kpis(train_env)
+            if args.noisy_training:
+
+                model.save(f"./models/tmp/sac")
+
+            # kpis = get_kpis(train_env)
 
             # Check kpis for training environment
 
@@ -203,19 +235,22 @@ if __name__ == "__main__":
                 actions, _ = model.predict(observations, deterministic=True)
                 observations, _, _, _, _ = train_env.step(actions)
                 
-            train_log = {}
 
-            rewards = np.array(pd.DataFrame(train_env.unwrapped.episode_rewards)['sum'].tolist())
+            reward_sum = train_env.unwrapped.episode_rewards[-1]['sum']
+            cost_sum = [sum(train_env.unwrapped.buildings[b].net_electricity_consumption_cost) for b in range(len(train_env.unwrapped.buildings))]
+            emission_sum = [sum(train_env.unwrapped.buildings[b].net_electricity_consumption_emission) for b in range(len(train_env.unwrapped.buildings))]
+           
+            train_log = {}
 
             wandb_step += 1     # count training step
 
             #District level logging
 
-            train_log["train/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
-            train_log["train/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
-            train_log["train/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
-            train_log["train/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
-            train_log["train/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
+            # train_log["train/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
+            # train_log["train/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
+            # train_log["train/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
+            # train_log["train/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
+            # train_log["train/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
 
             # Building level sampling and logging
 
@@ -223,13 +258,11 @@ if __name__ == "__main__":
 
                 # For logging
 
-                base_name = f"train/b_{b+1}_"
+                base_name = f"train/b_{eval_env.unwrapped.buildings[b].name[-1]}_"
 
-                # Searching by index works as after grouping the District metric goes last
-
-                train_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-                train_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
-                train_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
+                train_log[f"{base_name}mean_reward"] = reward_sum[b]/24
+                train_log[f"{base_name}mean_cost"] = cost_sum[b]/24
+                train_log[f"{base_name}mean_emission"] = emission_sum[b]/24
 
             # Check kpis for eval environment
 
@@ -242,15 +275,17 @@ if __name__ == "__main__":
                 
             eval_log = {}
 
-            rewards = np.array(pd.DataFrame(eval_env.unwrapped.episode_rewards)['sum'].tolist())
+            reward_sum = eval_env.unwrapped.episode_rewards[-1]['sum']
+            cost_sum = [sum(eval_env.unwrapped.buildings[b].net_electricity_consumption_cost) for b in range(len(eval_env.unwrapped.buildings))]
+            emission_sum = [sum(eval_env.unwrapped.buildings[b].net_electricity_consumption_emission) for b in range(len(eval_env.unwrapped.buildings))]
 
             #District level logging
 
-            eval_log["eval/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
-            eval_log["eval/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
-            eval_log["eval/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
-            eval_log["eval/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
-            eval_log["eval/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
+            # eval_log["eval/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
+            # eval_log["eval/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
+            # eval_log["eval/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
+            # eval_log["eval/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
+            # eval_log["eval/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
 
             # Building level sampling and logging
 
@@ -258,13 +293,19 @@ if __name__ == "__main__":
 
                 # For logging
 
-                base_name = f"eval/b_{b+1}_"
+                # base_name = f"eval/b_{b+1}_"
 
                 # Searching by index works as after grouping the District metric goes last
 
-                eval_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-                eval_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
-                eval_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
+                # eval_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
+                # eval_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
+                # eval_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
+
+                base_name = f"eval/b_{eval_env.unwrapped.buildings[b].name[-1]}_"
+
+                eval_log[f"{base_name}mean_reward"] = reward_sum[b]/24
+                eval_log[f"{base_name}mean_cost"] = cost_sum[b]/24
+                eval_log[f"{base_name}mean_emission"] = emission_sum[b]/24
 
             if i % args.log_interval == 0:
 
@@ -278,3 +319,17 @@ if __name__ == "__main__":
             # Update pbar
 
             pbar.update(1)
+
+    # Close WandB run
+
+    if args.noisy_training:
+
+        # Delete the temp model
+
+        os.remove(f"./models/tmp/sac.zip")
+
+    if args.wandb_log:
+
+        run.finish()
+
+    print("Training finished")

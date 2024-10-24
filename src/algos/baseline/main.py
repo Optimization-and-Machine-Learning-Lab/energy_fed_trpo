@@ -19,6 +19,8 @@ ACTIVE_OBSERVATIONS = [
 ]
 
 REWARDS = {
+    'cost': Cost,
+    'weighted_cost_emissions': WeightedCostAndEmissions,
     'cost_pen_no_batt': CostIneffectiveActionPenalization,
     'cost_pen_bad_batt': CostBadBattUsePenalization,
     'cost_pen_bad_action': CostIneffectiveActionPenalization,
@@ -78,13 +80,13 @@ def parse_args():
     parser = argparse.ArgumentParser(description='CityLearn TRPO experiment')
 
     parser.add_argument('--seed', type=int, default=0, metavar='S', help='Random seed (default: 0)')
-    parser.add_argument("--n_episodes", type=int, default=1500)
+    parser.add_argument("--n_episodes", type=int, default=100)
     parser.add_argument('--wandb-log', default=False, action='store_true', help='Log to wandb (default: True)')
     parser.add_argument('--device', type=str, default=None, help='device (default: None)')
     parser.add_argument('--log-interval', type=int, default=1, metavar='LI', help='Interval between training status logs (default: 1)')
     parser.add_argument('--day-count', type=int, default=1, help='Number of days for training (default: 1)')
     parser.add_argument('--data-path', type=str, default='./data/simple_data/', help='Data path (default: ./data/simple_data)')
-    parser.add_argument('--reward', type=str, default='cost_pen_no_batt', choices={'cost_pen_no_batt', 'cost_pen_bad_batt', 'cost_pen_bad_action'}, help='Reward function (default: cost_pen_no_batt)')
+    parser.add_argument('--reward', type=str, help='Reward function (default: cost_pen_no_batt)')
 
     args = parser.parse_args()
 
@@ -230,3 +232,11 @@ if __name__ == "__main__":
             # Update pbar
 
             pbar.update(1)
+
+    # Close WandB run
+
+    if args.wandb_log:
+
+        run.finish()
+
+    print("Training finished")

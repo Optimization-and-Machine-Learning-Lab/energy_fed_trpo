@@ -1,12 +1,16 @@
+from ast import arg
 import os
 import json
 import random
+import argparse
+from weakref import ref
 
 import numpy as np
 import pandas as pd
 
 from pathlib import Path
 from citylearn.data import DataSet
+from sklearn import base
 from src.utils.utils import set_seed
 
 # Bases used to generate simple data for the buildings
@@ -427,7 +431,130 @@ def generate_simple_data_from_ref(base_dataset: str = 'citylearn_challenge_2022_
     with open(os.path.join(dest_folder, 'schema.json'), 'w') as f:
         json.dump(schema, f, indent=4)
 
+def generate_simplest_data_from_ref(base_dataset: str = 'citylearn_challenge_2022_phase_all', dest_folder: str = 'data/simplest_data/'):
+
+    # Make sure the destination folder exists including the subfolders
+
+    Path(dest_folder).mkdir(parents=True, exist_ok=True)
+
+    # Get reference schema
+
+    schema = DataSet.get_schema(base_dataset)
+
+    # Reduce the number of buildings to 1
+
+    schema['buildings'] = {f'Building_{i}': schema['buildings'][f'Building_{i}'] for i in range(1, 2)}
+
+    # Extract the base weather, emissions and pricing data (doesn't change among buildings)
+
+    base_weather = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['weather']))
+    base_pricing = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['pricing']))
+    base_emissions = pd.read_csv(os.path.join(schema['root_directory'], schema['buildings']['Building_1']['carbon_intensity']))
+
+    # Read the base schema and process the json
+
+    # We need just to store the load and generation
+    # 0 - Solar generation
+    # 1 - Load
+
+    building_data = np.array([[[0.] * 2 for _ in range(365 * 24)] for _ in range(1)])
+    base_csvs = []
+
+    for building_no, (building_name, info) in enumerate(schema['buildings'].items()):
+
+        # Create custom building CSVs
+
+        base_csv = pd.read_csv(os.path.join(schema['root_directory'], info['energy_simulation']))
+
+        base_csvs.append(base_csv)
+
+        constant_solar = 1000 # In kWh
+
+        for day in range(365):
+
+            init_step = day * 24
+            end_step = day * 24 + 24
+
+            for hour in range(24):
+
+                curr_hour = init_step + hour
+
+                # Generate simpler solar data
+
+                if hour < 6 or hour > 18:
+                    building_data[building_no,curr_hour,0] = 0
+                else:
+                    building_data[building_no,curr_hour,0] = constant_solar
+
+                # Generate simple load following the rule
+
+                building_data[building_no,curr_hour,1] += generate_hour_load(curr_hour, constant_solar)
+
+    # Update the base csv with the new data
+
+    building_data = np.array(building_data).clip(min=0)
+
+    for building_no, (building_name, _) in enumerate(schema['buildings'].items()):
+
+        base_csvs[building_no]['solar_generation'] = building_data[building_no,:,0]
+        base_csvs[building_no]['non_shiftable_load'] = building_data[building_no,:,1] / 1000 # kWh
+
+        base_csvs[building_no].to_csv(os.path.join(dest_folder, f'{building_name}.csv'), index=False)
+
+        # Update the schema with the new paths
+
+        schema['buildings'][building_name]['energy_simulation'] = f'{building_name}.csv'
+
+        # Update the schema to guarantee no degradation in the battery efficiency
+
+        schema['buildings'][building_name]['electrical_storage']['attributes'] = {
+            "capacity": 6.4,
+            "efficiency": 1,
+            "capacity_loss_coefficient": 0.0,
+            "loss_coefficient": 0.0,
+            "nominal_power": 5.0,
+            "power_efficiency_curve": [[1, 1],[0, 1],[1, 1],[0, 1],[1, 1]]
+        }
+
+        # Set nominal power to 1 for solar panel to simplify case
+
+        schema['buildings'][building_name]['pv']['attributes']['nominal_power'] = 1.0
+
+    # Write pricing and emissions data to the destination folder
+
+    base_weather.to_csv(os.path.join(dest_folder, 'weather.csv'), index=False)
+    base_pricing.to_csv(os.path.join(dest_folder, 'pricing.csv'), index=False)
+    base_emissions.to_csv(os.path.join(dest_folder, 'carbon_intensity.csv'), index=False)
+
+    # Save the new schema in the destination folder
+
+    schema['root_directory'] = dest_folder
+
+    with open(os.path.join(dest_folder, 'schema.json'), 'w') as f:
+        json.dump(schema, f, indent=4)
+
+def parse_args():
+
+    parser = argparse.ArgumentParser(description='Generate simple data for the CityLearn Challenge')
+
+    parser.add_argument('--base_dataset', type=str, default='citylearn_challenge_2022_phase_all', help='Base dataset to generate simple data from')
+    parser.add_argument('--dest_folder', type=str, help='Destination folder to save the simple data')
+    parser.add_argument('--shift', type=bool, default=False, help='Whether to shift the data or not')
+    parser.add_argument('--function', type=str, default='generate_simple_data_from_ref', help='Function to call to generate the simple data')
+    parser.add_argument('--seed', type=int, default=0, help='Seed to set for the random data generation')
+
+    return parser.parse_args()
+
 if __name__ == '__main__':
 
-    set_seed(0)
-    generate_simple_data_from_ref(shift=True)
+    args = parse_args()
+
+    set_seed(args.seed)
+
+    if args.function == 'generate_simple_data_from_ref':
+
+        generate_simple_data_from_ref(base_dataset=args.base_dataset, dest_folder=args.dest_folder, shift=args.shift)
+
+    elif args.function == 'generate_simplest_data_from_ref':
+            
+        generate_simplest_data_from_ref(base_dataset=args.base_dataset, dest_folder=args.dest_folder)

@@ -1,6 +1,7 @@
 import json
 import wandb
 import argparse
+import pandas as pd
 
 from time import time
 from tqdm import tqdm
@@ -10,8 +11,6 @@ from citylearn.citylearn import CityLearnEnv
 from src.utils.utils import *
 from src.utils.cl_rewards import *
 from src.utils.cl_env_helper import *
-
-from citylearn.agents.rbc import HourRBC
 
 ACTIVE_OBSERVATIONS = [
     'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
@@ -26,32 +25,18 @@ REWARDS = {
     'cost_pen_bad_action': CostIneffectiveActionPenalization,
 }
 
-ACTION_MAP = {
-    1: 1/12, # Rule for 1 AM
-    2: 1/12, # Rule for 2 AM
-    3: 1/12, # Rule for 3 AM
-    4: 1/12, # Rule for 4 AM
-    5: 1/12, # Rule for 5 AM
-    6: 1/12, # Rule for 6 AM
-    7: 1/12, # Rule for 7 AM
-    8: 1/12, # Rule for 8 AM
-    9: 1/12, # Rule for 9 AM
-    10: 1/12, # Rule for 10 AM
-    11: 1/12, # Rule for 11 AM
-    12: 1/12, # Rule for 12 PM
-    13: -1/12, # Rule for 1 PM
-    14: -1/12, # Rule for 2 PM
-    15: -1/12, # Rule for 3 PM
-    16: -1/12, # Rule for 4 PM
-    17: -1/12, # Rule for 5 PM
-    18: -1/12, # Rule for 6 PM
-    19: -1/12, # Rule for 7 PM
-    20: -1/12, # Rule for 8 PM
-    21: -1/12, # Rule for 9 PM
-    22: -1/12, # Rule for 10 PM
-    23: -1/12, # Rule for 11 PM
-    24: -1/12, # Rule for 12 AM
-}
+def create_action_map(sol_dir: str) -> dict:
+
+    # Read CSV files from the solution directory that match the pattern
+
+    action_map = {}
+    for csv_file in Path(sol_dir).glob("*.csv"):
+        df = pd.read_csv(csv_file)
+        for index, row in df.iterrows():
+            action_map[row[0]] = row[1:].tolist()
+    return action_map
+    
+
 
 def init_config():
 
@@ -139,27 +124,18 @@ if __name__ == "__main__":
 
     # Setup WandB if enabled
 
-    algorithm_config = {
-        "action_map": {
-            **ACTION_MAP
-        }
-    }
-
-    # Setup WandB if enabled
-
     run = None
 
     if args.wandb_log:
 
         run =  wandb.init(
-            name=f"rbc_seed_{args.seed}", 
+            name=f"opt", 
             project="trpo_rl_energy",
             entity="optimllab",
             config={
-                "algorithm": "rbc",
+                "algorithm": "opt",
                 "seed": args.seed,
                 "reward": args.reward,
-                **algorithm_config
             },
             sync_tensorboard=False,
         )
@@ -190,8 +166,15 @@ if __name__ == "__main__":
     logs_path = wandb.run.dir if args.wandb_log else f"./logs/rbc_s_{args.seed}_t_{str(int(time()))}"
     Path(logs_path).mkdir(exist_ok=True)
 
-    # Initialize the model
-    model = HourRBC(eval_env, action_map=ACTION_MAP)
+    # Read the action map from the solution directory
+
+    action_map = []
+
+    for csv_file in sorted(Path(args.data_path).glob("sol_*.csv")):
+        
+        df = pd.read_csv(csv_file)
+
+        action_map.append(df['batt'].values)
 
     # Execute model in train env
 
@@ -204,17 +187,21 @@ if __name__ == "__main__":
 
             wandb_step += 1     # count training step
 
-            # Check kpis for eval environment
+            # Get the index of the environment
+
+            curr_step = eval_env.episode_tracker.simulation_start_time_step + 1
 
             observations, _ = eval_env.reset()
 
             while not eval_env.unwrapped.terminated:
 
-                actions = model.predict(observations, deterministic=True)
+                actions = [[action_map[b][curr_step]] for b in range(building_count)]
 
                 eval_env.reward_function.env_metadata['last_action'] = np.array(actions) # Apend the last action to the reward so it can be considered in its computation
 
                 observations, reward, _, _, _ = eval_env.step(actions)
+
+                curr_step += 1
 
             reward_sum = eval_env.unwrapped.episode_rewards[-1]['sum']
             cost_sum = [sum(eval_env.buildings[b].net_electricity_consumption_cost) for b in range(building_count)]
@@ -266,7 +253,7 @@ if __name__ == "__main__":
             # Update pbar
 
             pbar.update(1)
-    
+
     # Close WandB run
 
     if args.wandb_log:

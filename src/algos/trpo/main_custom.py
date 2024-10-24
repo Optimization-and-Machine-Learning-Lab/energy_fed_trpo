@@ -55,6 +55,13 @@ class TRPO:
         self.policy_net = Policy(num_inputs=self.num_inputs, num_outputs=self.num_actions).to(device=self.device)
         self.value_net = Value(num_inputs=self.num_inputs).to(device=self.device)
 
+        # Watch models with wandb
+
+        if self.wandb_log:
+                
+            wandb.watch(self.policy_net, log_freq=1, log='all')
+            wandb.watch(self.value_net, log_freq=1, log='all')
+
         # Define a path to create logs
 
         self.logs_path = wandb.run.dir if self.wandb_log else f"./logs/trpo_seed_{self.seed}_n_inputs_{self.num_inputs}_t_{str(int(time()))}"
@@ -80,7 +87,9 @@ class TRPO:
         action_mean, _, action_std = self.policy_net(Variable(state))
         action = torch.normal(action_mean, action_std)
 
-        return action if not eval else action_mean
+        # return action if not eval else action_mean
+    
+        return torch.zeros(action.shape).to(device=self.device) if eval else action
 
     def update_params(self, batch):
 
