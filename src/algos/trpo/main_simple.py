@@ -12,16 +12,23 @@ from time import time
 from pathlib import Path
 from collections import namedtuple
 from torch.autograd import Variable
-from citylearn.citylearn import CityLearnEnv
 from citylearn.preprocessing import OnehotEncoding, PeriodicNormalization
 
-from src.utils.utils import *
 from replay_memory import Memory
 from running_state import ZFilter
-from src.algos.trpo.trpo import *
-from src.utils.cl_rewards import CostIneffectiveActionPenalization, CostBadBattUsePenalization
-from src.algos.trpo.models import *
+from src.algos.trpo.trpo import trpo_step
+from src.algos.trpo.models import Policy, Value
 from src.utils.cl_env_helper import *
+from src.utils.utils import (
+    get_env_from_config, set_seed, set_flat_params_to, get_flat_params_from, get_flat_grad_from, normal_log_density, write_log
+)
+from src.utils.cl_rewards import (
+    Cost,
+    WeightedCostAndEmissions,
+    CostNoBattPenalization,
+    CostBadBattUsePenalization,
+    CostIneffectiveActionPenalization,
+)
 
 ACTIVE_OBSERVATIONS = [
     'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
@@ -29,7 +36,9 @@ ACTIVE_OBSERVATIONS = [
 ]
 
 REWARDS = {
-    'cost_pen_no_batt': CostIneffectiveActionPenalization,
+    'cost': Cost,
+    'weighted_cost_emissions': WeightedCostAndEmissions,
+    'cost_pen_no_batt': CostNoBattPenalization,
     'cost_pen_bad_batt': CostBadBattUsePenalization,
     'cost_pen_bad_action': CostIneffectiveActionPenalization,
 }
@@ -60,7 +69,7 @@ class TRPO:
 
         # Initialize evaluation environment (this will be fixed troughout the training)
 
-        self.eval_env = self.get_env_from_config(seed=2500)
+        self.eval_env = get_env_from_config(config=env_config, seed=0)
 
         # Extract environments characteristics
 
@@ -84,6 +93,11 @@ class TRPO:
             num_inputs=self.num_inputs, one_hot=self.personalization, one_hot_dim=self.building_count
         ).to(device=self.device)
 
+        if self.wandb_log:
+
+            wandb.watch(self.policy_net, log='all')
+            wandb.watch(self.value_net, log='all')
+
         # Define a path to create logs
 
         self.logs_path = wandb.run.dir if wandb.run is not None else f"./logs/trpo_seed_{self.seed}_n_inputs_{self.num_inputs}_t_{str(int(time()))}"
@@ -103,25 +117,6 @@ class TRPO:
         # Properties
             
         self.transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state', 'reward'))
-
-    def get_env_from_config(self, seed : int = None):
-
-        seed = seed if seed is not None else random.randint(2000, 2500)
-
-        # Fix seed to maintain simulation period among different seeds for the models
-
-        simulation_start_time_step, simulation_end_time_step = select_simulation_period(
-            dataset_name='citylearn_challenge_2022_phase_all', count=self.env_config['day_count'], seed=seed
-        ) 
-
-        return CityLearnEnv(
-            schema=self.env_config["schema"],
-            active_observations=self.env_config["active_observations"],
-            simulation_start_time_step=simulation_start_time_step,
-            simulation_end_time_step=simulation_end_time_step,
-            reward_function=self.env_config["reward_function"],
-            random_seed=self.env_config["random_seed"]
-        )
 
     def select_action(self, state, eval : bool = False):
 
@@ -236,7 +231,7 @@ class TRPO:
 
                 if self.noisy or i_episode == 0:
                     
-                    self.train_env = self.get_env_from_config(seed=i_episode) if self.training_type != 'upperbound' else deepcopy(self.eval_env)
+                    self.train_env = get_env_from_config(config=self.env_config, seed=i_episode) if self.training_type != 'upperbound' else deepcopy(self.eval_env)
 
                 # Increment the pre-training index when num_episodes // self.building_count timesteps passed
                 
@@ -307,11 +302,11 @@ class TRPO:
                             memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b])
 
                         state = next_state
-
-                    reward_batch += self.train_env.unwrapped.episode_rewards[-1]['sum']
-                    cost_batch += [sum(self.train_env.buildings[b].net_electricity_consumption_cost) for b in range(self.building_count)]
-                    emission_batch += [sum(self.train_env.buildings[b].net_electricity_consumption_emission) for b in range(self.building_count)]
-
+                        
+                    reward_batch += self.train_env.unwrapped.episode_rewards[-1]['mean']
+                    cost_batch += [np.mean(b.net_electricity_consumption_cost) for b in self.train_env.buildings]
+                    emission_batch += [np.mean(b.net_electricity_consumption_emission) for b in self.train_env.buildings]
+                    
                 # Perform TRPO update
 
                 batch = []
@@ -329,33 +324,17 @@ class TRPO:
 
                 # Logging
 
-                # rewards = np.array(pd.DataFrame(self.train_env.unwrapped.episode_rewards)['sum'].tolist())
-
                 if i_episode % self.log_interval == 0:
 
                     # Logging for current episode
                     
-                    # kpis = get_kpis(self.train_env).reset_index()
-                    
                     train_log = {}
 
-                    wandb_step += 1     # count training step
-
-                    #District level logging
-
-                    # train_log["train/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
-                    # train_log["train/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
-                    # train_log["train/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
-                    # train_log["train/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
-                    # train_log["train/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
+                    train_log["train/mean_hour_reward"] = np.mean([r / self.batch_size for r in reward_batch])
 
                     # Building level sampling and logging
 
                     for b in range(self.building_count):
-
-                        # For logging
-
-                        # base_name = f"train/b_{b+1}_"
 
                         reward_batch[b] /= self.batch_size
                         cost_batch[b] /= self.batch_size
@@ -363,15 +342,9 @@ class TRPO:
 
                         base_name = f"train/b_{self.train_env.buildings[b].name[-1]}_"
 
-                        train_log[f"{base_name}mean_reward"] = reward_batch[b]/24
-                        train_log[f"{base_name}mean_cost"] = cost_batch[b]/24
-                        train_log[f"{base_name}mean_emission"] = emission_batch[b]/24
-
-                        # Searching by index works as after grouping the District metric goes last
-
-                        # train_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-                        # train_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
-                        # train_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
+                        train_log[f"{base_name}mean_hour_reward"] = reward_batch[b]
+                        train_log[f"{base_name}mean_hour_cost"] = cost_batch[b]
+                        train_log[f"{base_name}mean_hour_emission"] = emission_batch[b]
 
                     eval_log = self.evaluation()
 
@@ -381,6 +354,8 @@ class TRPO:
                     if self.wandb_log:
 
                         wandb.log({**train_log, **eval_log}, step = int(wandb_step))
+
+                wandb_step += 1     # count training step
 
                 # Update pbar
 
@@ -427,40 +402,21 @@ class TRPO:
                     self.train_running_state[i](next_state[i][1:])
                 )) for i in range(self.building_count)]
         
-        eval_reward = self.eval_env.unwrapped.episode_rewards[-1]['sum']
-        eval_cost = [sum(self.eval_env.buildings[b].net_electricity_consumption_cost) for b in range(self.building_count)]
-        eval_emission = [sum(self.eval_env.buildings[b].net_electricity_consumption_emission) for b in range(self.building_count)]
-
-        # Logging
-
+        b_reward_mean = self.eval_env.unwrapped.episode_rewards[-1]['mean']
+        b_cost_sum = [np.mean(b.net_electricity_consumption_cost) for b in self.eval_env.buildings]
+        b_emission_sum = [np.mean(b.net_electricity_consumption_emission) for b in self.eval_env.buildings]
+        
         eval_log = {}
 
-        # kpis = get_kpis(self.eval_env)
-        # rewards = np.array(pd.DataFrame(self.eval_env.unwrapped.episode_rewards)['sum'].tolist())
-
-        #District level logging
-
-        # eval_log["eval/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
-        # eval_log["eval/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
-        # eval_log["eval/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
-        # eval_log["eval/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
-        # eval_log["eval/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
-
-        # Building level sampling and logging
+        eval_log["eval/mean_hour_reward"] = np.mean(b_reward_mean)
 
         for b in range(self.building_count):
 
-            # base_name = f"eval/b_{b+1}_"
-
-            # eval_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-            # eval_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b + 1]
-            # eval_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b + 1]
-
             base_name = f"eval/b_{self.eval_env.buildings[b].name[-1]}_"
 
-            eval_log[f"{base_name}mean_reward"] = eval_reward[b]/24
-            eval_log[f"{base_name}mean_cost"] = eval_cost[b]/24
-            eval_log[f"{base_name}mean_emission"] = eval_emission[b]/24
+            eval_log[f"{base_name}mean_hour_reward"] = b_reward_mean[b]
+            eval_log[f"{base_name}mean_hour_cost"] = b_cost_sum[b]
+            eval_log[f"{base_name}mean_hour_emission"] = b_emission_sum[b]
 
         return eval_log
 
@@ -518,19 +474,19 @@ def parse_args():
     parser.add_argument('--max-kl', type=float, default=1e-2, metavar='Max_KL', help='Max kl value (default: 1e-2)')
     parser.add_argument('--damping', type=float, default=1e-1, metavar='D', help='Damping (default: 1e-1)')
     parser.add_argument('--seed', type=int, default=0, metavar='S', help='Random seed (default: 0)')
-    parser.add_argument('--batch-size', type=int, default=15000, metavar='BS', help='Batch size (default: 15000)')
+    parser.add_argument('--batch-size', type=int, default=32, metavar='BS', help='Batch size (default: 15000)')
     parser.add_argument('--log-interval', type=int, default=1, metavar='LI', help='Interval between training status logs (default: 1)')
     parser.add_argument('--training-type', type=str, default='individual', choices={'individual', 'upperbound', 'fl', 'fl-personalized'}, help='Training type (default: individual)')
     parser.add_argument('--pre_training_steps', type=int, default=0, help='Number of pre-training steps (default: 0)')
     parser.add_argument('--wandb-log', default=False, action='store_true', help='Log to wandb (default: True)')
     parser.add_argument('--device', type=str, default=None, help='device (default: None)')
-    parser.add_argument('--n_episodes', type=int, default=1500, help='Number of episodes (default: 1500)')
+    parser.add_argument('--n_episodes', type=int, default=100, help='Number of episodes (default: 1500)')
     parser.add_argument('--day-count', type=int, default=1, help='Number of days for training (default: 1)')
     parser.add_argument('--n_buildings', type=int, default=1, help='Number of buildings to train (default: 1)')
     parser.add_argument('--building_id', type=int, default=1, help='Trained building (if individual building training)')
     parser.add_argument('--data-path', type=str, default='./data/simple_data/', help='Data path (default: ./data/simple_data)')
     parser.add_argument('--noisy_training', default=False, action='store_true', help='Noisy training (default: False)')
-    parser.add_argument('--reward', type=str, default='cost_pen_no_batt', choices={'cost_pen_no_batt', 'cost_pen_bad_batt', 'cost_pen_bad_action'}, help='Reward function (default: cost_pen_no_batt)')
+    parser.add_argument('--reward', type=str, help='Reward function (default: cost_pen_no_batt)')
 
     args = parser.parse_args()
 
@@ -610,6 +566,7 @@ if __name__ == "__main__":
         "reward_function": REWARDS[args.reward],
         "random_seed": args.seed,
         "day_count": args.day_count,
+        "extended_obs": True,
     }
 
     # TRPO initialization

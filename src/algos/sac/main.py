@@ -6,79 +6,39 @@ import argparse
 from time import time 
 from tqdm import tqdm
 from pathlib import Path
-from citylearn.citylearn import CityLearnEnv
 
 from stable_baselines3.common.noise import NormalActionNoise
-from src.utils.utils import *
+from src.utils.utils import set_seed, write_log, get_env_from_config, init_config
 from stable_baselines3 import SAC
 from src.utils.cl_rewards import *
 from src.utils.cl_env_helper import *
-
+from stable_baselines3.common.monitor import Monitor
 from citylearn.wrappers import (
     NormalizedObservationWrapper,
     StableBaselines3Wrapper,
 )
 
+# ACTIVE_OBSERVATIONS = [
+#     'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
+#     'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
+# ]
+
 ACTIVE_OBSERVATIONS = [
-    'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
-    'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
+    'hour',
+    'day_type',
+    'solar_generation',
+    'net_electricity_consumption',
+    'electrical_storage_soc',
+    'non_shiftable_load',
 ]
 
 REWARDS = {
     'cost': Cost,
     'weighted_cost_emissions': WeightedCostAndEmissions,
-    'cost_pen_no_batt': CostIneffectiveActionPenalization,
+    'cost_pen_no_batt': CostNoBattPenalization,
     'cost_pen_bad_batt': CostBadBattUsePenalization,
     'cost_pen_bad_action': CostIneffectiveActionPenalization,
 }
-
-def init_config():
-
-    # Make sure logs folder exists
-
-    Path("./logs").mkdir(exist_ok=True)
-
-    # Get device
-
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-
-    # Set numpy print options
-
-    np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
-
-    # Set default tensor type to torch.DoubleTensor
-
-    if device == "mps":
-        torch.set_default_dtype(torch.float32)
-    else:
-        torch.set_default_dtype(torch.float64)
-
-    # Enable backcompat warnings
-
-    torch.utils.backcompat.broadcast_warning.enabled = True
-    torch.utils.backcompat.keepdim_warning.enabled = True
-
-    return device
-
-def get_env_from_config(config: dict, seed : int = None):
-
-    seed = seed if seed is not None else random.randint(2000, 2500)
-
-    # Fix seed to maintain simulation period among different seeds for the models
-
-    simulation_start_time_step, simulation_end_time_step = select_simulation_period(
-        dataset_name='citylearn_challenge_2022_phase_all', count=config['day_count'], seed=seed
-    ) 
-
-    return CityLearnEnv(
-        schema=config["schema"],
-        active_observations=config["active_observations"],
-        simulation_start_time_step=simulation_start_time_step,
-        simulation_end_time_step=simulation_end_time_step,
-        reward_function=config["reward_function"],
-        random_seed=config["random_seed"],
-        central_agent=config["central_agent"],
-    )
 
 def parse_args():
 
@@ -90,8 +50,8 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=0.9)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--qf_nns", type=int, default=256)
-    parser.add_argument("--pi_nns", type=int, default=256)
+    parser.add_argument("--qf_nns", type=int, default=16)
+    parser.add_argument("--pi_nns", type=int, default=32)
     parser.add_argument("--buffer_size", type=int, default=int(2e6))
     parser.add_argument('--wandb-log', default=False, action='store_true', help='Log to wandb (default: True)')
     parser.add_argument('--log-interval', type=int, default=1, metavar='LI', help='Interval between training status logs (default: 1)')
@@ -128,20 +88,21 @@ if __name__ == "__main__":
     model_config = {
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,
-        # "learning_starts": 1,
-        "train_freq": (6, 'step'),
+        "learning_starts": int(args.day_count * 24 * 0.5),
+        "train_freq": (int(args.day_count * 24 * 5), "step"),
         "gamma": args.gamma,
         "tau": args.tau,
         "buffer_size": args.buffer_size,
         "device": device,
         "seed": args.seed,
-        # "policy_kwargs": {
-        #     "net_arch": {
-        #         "pi": [args.pi_nns, args.pi_nns],
-        #         "qf": [args.qf_nns, args.qf_nns],
-        #     }
-        # },
-        "action_noise": NormalActionNoise(mean=np.zeros(5), sigma=0.1 * np.ones(5))
+        "policy_kwargs": {
+            "net_arch": {
+                "pi": [args.pi_nns, args.pi_nns],
+                "qf": [args.qf_nns, args.qf_nns],
+            }
+        },
+        "action_noise": NormalActionNoise(mean=np.zeros(5), sigma=0.1 * np.ones(5)),
+        # "verbose": 1,
     }
 
     # Setup WandB if enabled
@@ -167,9 +128,13 @@ if __name__ == "__main__":
     # Configure Environment
 
     schema_filepath = args.data_path + 'schema.json'
+    eval_schema_filepath = args.data_path + 'eval/schema.json'
 
     with open(schema_filepath) as json_file:
         schema_dict = json.load(json_file)
+
+    with open(eval_schema_filepath) as json_file:
+        eval_schema_dict = json.load(json_file)
 
     # Environment initialization, we create two different to not affect the episode tracker
                 
@@ -180,17 +145,24 @@ if __name__ == "__main__":
         "reward_function": REWARDS[args.reward],
         "random_seed": args.seed,
         "day_count": args.day_count,
+        # "buildings": ['Building_1'],
+        "extended_obs": True,
     }
 
     # initialize environment
 
-    train_env = get_env_from_config(config=env_config, seed=0)
+    train_env = get_env_from_config(config=env_config, seed=args.seed)
     train_env = NormalizedObservationWrapper(train_env)
     train_env = StableBaselines3Wrapper(train_env)
+    train_env = Monitor(train_env)
 
-    eval_env = get_env_from_config(config=env_config, seed=2500)
+    eval_env = get_env_from_config(config={
+        **env_config,
+        "schema": eval_schema_dict,
+    }, seed=args.seed)
     eval_env = NormalizedObservationWrapper(eval_env)
     eval_env = StableBaselines3Wrapper(eval_env)
+    eval_env = Monitor(eval_env)
 
     # Define a path to create logs
 
@@ -198,7 +170,25 @@ if __name__ == "__main__":
     Path(logs_path).mkdir(exist_ok=True)
 
     # Initialize the model
-    model = SAC("MlpPolicy", train_env, **model_config)
+    model = SAC("MlpPolicy", train_env, **model_config, tensorboard_log=logs_path)
+
+    # Train the model
+    
+    # model.learn(
+    #     total_timesteps=train_env.unwrapped.time_steps * args.n_episodes,
+    #     progress_bar=True,
+    #     callback=[
+    #         CustomCallback(),
+    #         # WandbCallback(verbose=1),
+    #         CustomEvalCallback(
+    #             eval_env=eval_env,
+    #             n_eval_episodes=1,
+    #             eval_freq=train_env.unwrapped.time_steps,
+    #             deterministic=True,
+    #         )
+                
+    #     ]
+    # )
 
     with tqdm(total=args.n_episodes, nrows=10) as pbar:
 
@@ -217,16 +207,12 @@ if __name__ == "__main__":
 
             # Train the model
             model.learn(
-                total_timesteps=(train_env.unwrapped.time_steps - 1), # * 5,
+                total_timesteps=(train_env.unwrapped.time_steps - 1),
             )
 
             if args.noisy_training:
 
                 model.save(f"./models/tmp/sac")
-
-            # kpis = get_kpis(train_env)
-
-            # Check kpis for training environment
 
             observations, _ = train_env.reset()
 
@@ -235,34 +221,22 @@ if __name__ == "__main__":
                 actions, _ = model.predict(observations, deterministic=True)
                 observations, _, _, _, _ = train_env.step(actions)
                 
-
-            reward_sum = train_env.unwrapped.episode_rewards[-1]['sum']
-            cost_sum = [sum(train_env.unwrapped.buildings[b].net_electricity_consumption_cost) for b in range(len(train_env.unwrapped.buildings))]
-            emission_sum = [sum(train_env.unwrapped.buildings[b].net_electricity_consumption_emission) for b in range(len(train_env.unwrapped.buildings))]
-           
+            b_reward_mean = train_env.unwrapped.episode_rewards[-1]['mean']
+            b_cost_sum = [np.mean(b.net_electricity_consumption_cost) for b in train_env.unwrapped.buildings]
+            b_emission_sum = [np.mean(b.net_electricity_consumption_emission) for b in train_env.unwrapped.buildings]
+            
             train_log = {}
 
-            wandb_step += 1     # count training step
-
-            #District level logging
-
-            # train_log["train/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
-            # train_log["train/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
-            # train_log["train/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
-            # train_log["train/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
-            # train_log["train/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
-
-            # Building level sampling and logging
+            train_log["train/mean_hour_reward"] = np.mean(b_reward_mean)
 
             for b in range(len(train_env.unwrapped.buildings)):
 
                 # For logging
 
-                base_name = f"train/b_{eval_env.unwrapped.buildings[b].name[-1]}_"
+                base_name = f"train/b_{train_env.unwrapped.buildings[b].name[-1]}_"
 
-                train_log[f"{base_name}mean_reward"] = reward_sum[b]/24
-                train_log[f"{base_name}mean_cost"] = cost_sum[b]/24
-                train_log[f"{base_name}mean_emission"] = emission_sum[b]/24
+                train_log[f"{base_name}mean_hour_cost"] = b_cost_sum[b]
+                train_log[f"{base_name}mean_hour_emission"] = b_emission_sum[b]
 
             # Check kpis for eval environment
 
@@ -275,37 +249,20 @@ if __name__ == "__main__":
                 
             eval_log = {}
 
-            reward_sum = eval_env.unwrapped.episode_rewards[-1]['sum']
-            cost_sum = [sum(eval_env.unwrapped.buildings[b].net_electricity_consumption_cost) for b in range(len(eval_env.unwrapped.buildings))]
-            emission_sum = [sum(eval_env.unwrapped.buildings[b].net_electricity_consumption_emission) for b in range(len(eval_env.unwrapped.buildings))]
-
-            #District level logging
-
-            # eval_log["eval/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
-            # eval_log["eval/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
-            # eval_log["eval/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
-            # eval_log["eval/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
-            # eval_log["eval/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
-
+            b_reward_mean = eval_env.unwrapped.episode_rewards[-1]['mean']
+            b_cost_sum = [np.mean(b.net_electricity_consumption_cost) for b in train_env.unwrapped.buildings]
+            b_emission_sum = [np.mean(b.net_electricity_consumption_emission) for b in train_env.unwrapped.buildings]
+            
             # Building level sampling and logging
+
+            eval_log["eval/mean_hour_reward"] = np.mean(b_reward_mean)
 
             for b in range(len(eval_env.unwrapped.buildings)):
 
-                # For logging
-
-                # base_name = f"eval/b_{b+1}_"
-
-                # Searching by index works as after grouping the District metric goes last
-
-                # eval_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-                # eval_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
-                # eval_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
-
                 base_name = f"eval/b_{eval_env.unwrapped.buildings[b].name[-1]}_"
 
-                eval_log[f"{base_name}mean_reward"] = reward_sum[b]/24
-                eval_log[f"{base_name}mean_cost"] = cost_sum[b]/24
-                eval_log[f"{base_name}mean_emission"] = emission_sum[b]/24
+                eval_log[f"{base_name}mean_hour_cost"] = b_cost_sum[b]
+                eval_log[f"{base_name}mean_hour_emission"] = b_emission_sum[b]
 
             if i % args.log_interval == 0:
 
@@ -316,6 +273,8 @@ if __name__ == "__main__":
 
                     wandb.log({**train_log, **eval_log}, step = int(wandb_step))
 
+            wandb_step += 1     # count training step
+            
             # Update pbar
 
             pbar.update(1)

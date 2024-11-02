@@ -25,7 +25,7 @@ from typing import Any
 
 from citylearn.reward_function import RewardFunction
 
-class CostIneffectiveActionPenalization(RewardFunction):
+class CostNoBattPenalization(RewardFunction):
 
     def __init__(self, env_metadata: dict[str, Any]):
         r"""Initialize CustomReward.
@@ -80,7 +80,7 @@ class CostIneffectiveActionPenalization(RewardFunction):
 
             reward_list.append(reward)
 
-        return reward_list
+        return [sum(reward_list)] if self.central_agent else reward_list
     
 class CostBadBattUsePenalization(RewardFunction):
 
@@ -196,7 +196,7 @@ class CostBadBattUsePenalization(RewardFunction):
 
             reward_list.append(reward - penalty)
 
-        return reward_list
+        return [sum(reward_list)] if self.central_agent else reward_list
     
 class CostIneffectiveActionPenalization(RewardFunction):
 
@@ -252,7 +252,7 @@ class CostIneffectiveActionPenalization(RewardFunction):
 
             reward_list.append(cost - penalization)
 
-        return reward_list
+        return [sum(reward_list)] if self.central_agent else reward_list
     
 class Cost(RewardFunction):
 
@@ -306,7 +306,7 @@ class Cost(RewardFunction):
 
             reward_list.append(cost)
 
-        return reward_list
+        return [sum(reward_list)] if self.central_agent else reward_list
     
 class WeightedCostAndEmissions(RewardFunction):
 
@@ -361,4 +361,4 @@ class WeightedCostAndEmissions(RewardFunction):
             reward = - (self.cost_weight * cost + self.emissions_weight * emissions)
             reward_list.append(reward)
 
-        return reward_list
+        return [np.mean(reward_list)] if self.central_agent else reward_list

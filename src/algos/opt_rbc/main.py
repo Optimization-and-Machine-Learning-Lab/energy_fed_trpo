@@ -1,89 +1,33 @@
 import json
 import wandb
 import argparse
+import numpy as np
 import pandas as pd
 
 from time import time
 from tqdm import tqdm
 from pathlib import Path
-from citylearn.citylearn import CityLearnEnv
 
-from src.utils.utils import *
-from src.utils.cl_rewards import *
-from src.utils.cl_env_helper import *
+from src.utils.utils import init_config, set_seed, write_log, get_env_from_config
+from src.utils.cl_rewards import (
+    Cost,
+    WeightedCostAndEmissions,
+    CostNoBattPenalization,
+    CostBadBattUsePenalization,
+    CostIneffectiveActionPenalization,
+)
 
 ACTIVE_OBSERVATIONS = [
-    'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
-    'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
+    'hour',
 ]
 
 REWARDS = {
     'cost': Cost,
     'weighted_cost_emissions': WeightedCostAndEmissions,
-    'cost_pen_no_batt': CostIneffectiveActionPenalization,
+    'cost_pen_no_batt': CostNoBattPenalization,
     'cost_pen_bad_batt': CostBadBattUsePenalization,
     'cost_pen_bad_action': CostIneffectiveActionPenalization,
 }
-
-def create_action_map(sol_dir: str) -> dict:
-
-    # Read CSV files from the solution directory that match the pattern
-
-    action_map = {}
-    for csv_file in Path(sol_dir).glob("*.csv"):
-        df = pd.read_csv(csv_file)
-        for index, row in df.iterrows():
-            action_map[row[0]] = row[1:].tolist()
-    return action_map
-    
-
-
-def init_config():
-
-    # Make sure logs folder exists
-
-    Path("./logs").mkdir(exist_ok=True)
-
-    # Get device
-
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-
-    # Set numpy print options
-
-    np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
-
-    # Set default tensor type to torch.DoubleTensor
-
-    if device == "mps":
-        torch.set_default_dtype(torch.float32)
-    else:
-        torch.set_default_dtype(torch.float64)
-
-    # Enable backcompat warnings
-
-    torch.utils.backcompat.broadcast_warning.enabled = True
-    torch.utils.backcompat.keepdim_warning.enabled = True
-
-    return device
-
-def get_env_from_config(config: dict, seed : int = None):
-
-    seed = seed if seed is not None else random.randint(2000, 2500)
-
-    # Fix seed to maintain simulation period among different seeds for the models
-
-    simulation_start_time_step, simulation_end_time_step = select_simulation_period(
-        dataset_name='citylearn_challenge_2022_phase_all', count=config['day_count'], seed=seed
-    ) 
-
-    return CityLearnEnv(
-        schema=config["schema"],
-        active_observations=config["active_observations"],
-        simulation_start_time_step=simulation_start_time_step,
-        simulation_end_time_step=simulation_end_time_step,
-        reward_function=config["reward_function"],
-        random_seed=config["random_seed"]
-    )
 
 def parse_args():
 
@@ -163,7 +107,7 @@ if __name__ == "__main__":
 
     # Define a path to create logs
 
-    logs_path = wandb.run.dir if args.wandb_log else f"./logs/rbc_s_{args.seed}_t_{str(int(time()))}"
+    logs_path = wandb.run.dir if args.wandb_log else f"./logs/opt_s_{args.seed}_t_{str(int(time()))}"
     Path(logs_path).mkdir(exist_ok=True)
 
     # Read the action map from the solution directory
@@ -185,8 +129,6 @@ if __name__ == "__main__":
 
         for i in range(args.n_episodes):
 
-            wandb_step += 1     # count training step
-
             # Get the index of the environment
 
             curr_step = eval_env.episode_tracker.simulation_start_time_step + 1
@@ -203,43 +145,21 @@ if __name__ == "__main__":
 
                 curr_step += 1
 
-            reward_sum = eval_env.unwrapped.episode_rewards[-1]['sum']
-            cost_sum = [sum(eval_env.buildings[b].net_electricity_consumption_cost) for b in range(building_count)]
-            emission_sum = [sum(eval_env.buildings[b].net_electricity_consumption_emission) for b in range(building_count)]
+            b_reward_mean = eval_env.unwrapped.episode_rewards[-1]['mean']
+            b_cost_sum = [np.mean(b.net_electricity_consumption_cost) for b in eval_env.buildings]
+            b_emission_sum = [np.mean(b.net_electricity_consumption_emission) for b in eval_env.buildings]
                 
-            # kpis = get_kpis(eval_env)
-
             eval_log = {}
 
-            # rewards = np.array(pd.DataFrame(eval_env.unwrapped.episode_rewards)['sum'].tolist())
-
-            #District level logging
-
-            # eval_log["eval/d_emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[0]
-            # eval_log["eval/d_cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[0]
-            # eval_log["eval/d_daily_peak_avg"] = kpis[kpis['kpi'] == 'Avg. daily peak']['value'].iloc[0]
-            # eval_log["eval/d_load_factor_avg"] = kpis[kpis['kpi'] == '1 - load factor']['value'].iloc[0]
-            # eval_log["eval/d_ramping_avg"] = kpis[kpis['kpi'] == 'Ramping']['value'].iloc[0]
-
-            # Building level sampling and logging
+            eval_log["eval/mean_hour_reward"] = np.mean(b_reward_mean)
 
             for b in range(len(eval_env.unwrapped.buildings)):
 
-                # For logging
-
-                # base_name = f"eval/b_{b+1}_"
-
-                # Searching by index works as after grouping the District metric goes last
-
-                # eval_log[f"{base_name}reward_avg"] = rewards[:,b].mean()
-                # eval_log[f"{base_name}emission_avg"] = kpis[kpis['kpi'] == 'Emissions']['value'].iloc[b]
-                # eval_log[f"{base_name}cost_avg"] = kpis[kpis['kpi'] == 'Cost']['value'].iloc[b]
-
                 base_name = f"eval/b_{eval_env.buildings[b].name[-1]}_"
 
-                eval_log[f"{base_name}mean_reward"] = reward_sum[b]/24
-                eval_log[f"{base_name}mean_cost"] = cost_sum[b]/24
-                eval_log[f"{base_name}mean_emission"] = emission_sum[b]/24
+                eval_log[f"{base_name}mean_hour_reward"] = b_reward_mean[b]
+                eval_log[f"{base_name}mean_hour_cost"] = b_cost_sum[b]
+                eval_log[f"{base_name}mean_hour_emission"] = b_emission_sum[b]
 
             if i % args.log_interval == 0:
 
@@ -249,6 +169,8 @@ if __name__ == "__main__":
                 if args.wandb_log:
 
                     wandb.log({**eval_log}, step = int(wandb_step))
+
+            wandb_step += 1     # count training step
 
             # Update pbar
 

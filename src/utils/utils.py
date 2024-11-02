@@ -3,6 +3,58 @@ import random
 import torch
 import numpy as np
 
+from pathlib import Path
+# from citylearn.citylearn import CityLearnEnv
+from src.custom.citylearn import CityLearnEnv
+from src.utils.cl_env_helper import select_simulation_period
+
+
+def get_env_from_config(config: dict, seed : int = None):
+
+    seed = seed if seed is not None else random.randint(2000, 2500)
+
+    # Fix seed to maintain simulation period among different seeds for the models
+
+    simulation_start_time_step, simulation_end_time_step = select_simulation_period(
+        dataset_name='citylearn_challenge_2022_phase_all', count=config['day_count'], seed=seed
+    ) 
+
+    return CityLearnEnv(
+        **config,
+        simulation_start_time_step=simulation_start_time_step,
+        simulation_end_time_step=simulation_end_time_step,
+    )
+
+def init_config():
+
+    torch.set_num_threads(10)
+    
+    # Make sure logs folder exists
+
+    Path("./logs").mkdir(exist_ok=True)
+
+    # Get device
+
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+
+    # Set numpy print options
+
+    np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
+
+    # Set default tensor type to torch.DoubleTensor
+
+    if device == "mps":
+        torch.set_default_dtype(torch.float32)
+    else:
+        torch.set_default_dtype(torch.float64)
+
+    # Enable backcompat warnings
+
+    torch.utils.backcompat.broadcast_warning.enabled = True
+    torch.utils.backcompat.keepdim_warning.enabled = True
+
+    return device
+
 def set_seed(seed):
     """
     Set the seed for all random number generators.
