@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from citylearn import __version__ as citylearn_version
 from citylearn.base import Environment, EpisodeTracker
-from citylearn.building import Building, DynamicsBuilding
+from .building import Building, DynamicsBuilding
 from citylearn.cost_function import CostFunction
 from citylearn.data import DataSet, EnergySimulation, CarbonIntensity, Pricing, TOLERANCE, Weather
 from citylearn.energy_model import Battery, PV
@@ -122,12 +122,14 @@ class CityLearnEnv(Environment, Env):
         central_agent: bool = None, shared_observations: List[str] = None, active_observations: Union[List[str], List[List[str]]] = None, 
         inactive_observations: Union[List[str], List[List[str]]] = None, active_actions: Union[List[str], List[List[str]]] = None, 
         inactive_actions: Union[List[str], List[List[str]]] = None, simulate_power_outage: bool = None, solar_generation: bool = None, random_seed: int = None, 
-        extended_obs: bool = False, **kwargs: Any,
+        extended_obs: bool = False, price_margin: float = 0.1, **kwargs: Any,
     ):
         self.schema = schema
         self.__rewards = None
         self.buildings = []
         self.random_seed = random_seed
+        self.price_margin = price_margin
+        
         root_directory, buildings, episode_time_steps, rolling_episode_split, random_episode_split, \
             seconds_per_time_step, reward_function, central_agent, shared_observations, episode_tracker = self._load(
                 deepcopy(self.schema),
@@ -167,6 +169,17 @@ class CityLearnEnv(Environment, Env):
 
         # set reward function
         self.reward_function = reward_function
+
+        # Read the optimal policy for this environment
+
+        self.optimal_actions = []
+        self.optimal_soc = []
+
+        for csv_file in sorted(Path(self.root_directory).glob("sol_*.csv")):
+
+            df = pd.read_csv(csv_file)
+            self.optimal_actions.append(df['batt'].values[episode_tracker.simulation_start_time_step + 1 : episode_tracker.simulation_end_time_step + 1])
+            self.optimal_soc.append(df['soc'].values[episode_tracker.simulation_start_time_step + 1 : episode_tracker.simulation_end_time_step + 1])
 
         # Prepare extended observations information
 
@@ -208,9 +221,14 @@ class CityLearnEnv(Environment, Env):
 
         # set reward metadata
         self.reward_function.env_metadata = self.get_metadata()
+        self.reward_function.last_soc = [b.electrical_storage.soc[self.time_step] for b in self.buildings]
 
         # reward history tracker
         self.__episode_rewards = []
+
+        # Last action tracker
+
+        self.last_action = None
 
     @property
     def schema(self) -> Union[str, Path, Mapping[str, Any]]:
@@ -842,6 +860,7 @@ class CityLearnEnv(Environment, Env):
             'central_agent': self.central_agent,
             'shared_observations': self.shared_observations,
             'buildings': [b.get_metadata() for b in self.buildings],
+            'price_margin': self.price_margin,
         }
 
     @staticmethod
@@ -897,6 +916,10 @@ class CityLearnEnv(Environment, Env):
             `info` contains auxiliary diagnostic information (helpful for debugging, learning, and logging).
             Override :meth"`get_info` to get custom key-value pairs in `info`.
         """
+
+        # Save last action for each building in the metadata (for reward function)
+
+        self.reward_function.env_metadata['last_action'] = actions
 
         self.next_time_step()
         actions = self._parse_actions(actions)
@@ -1208,7 +1231,7 @@ class CityLearnEnv(Environment, Env):
             `info` contains auxiliary diagnostic information (helpful for debugging, learning, and logging).
             Override :meth"`get_info` to get custom key-value pairs in `info`.
         """
-
+        
         # object reset
         super().reset()
 
@@ -1240,6 +1263,10 @@ class CityLearnEnv(Environment, Env):
         self.__net_electricity_consumption_emission = []
         self.update_variables()
 
+        # Initialize the SoC in reward function
+
+        self.reward_function.last_soc = [b.electrical_storage.soc[self.time_step] for b in self.buildings]
+        
         if self.extended_obs:
 
             load_preds = np.array([self.pred_files[i][0] * self.normalizers[i] for i in range(len(self.pred_files))], dtype=self.pred_files[0].dtype)
@@ -1265,6 +1292,7 @@ class CityLearnEnv(Environment, Env):
                 extended_obs = [np.concatenate([o, load_preds[i]]) for i, o in enumerate(self.observations)]
 
             return extended_obs, self.get_info()
+
 
         return self.observations, self.get_info()
 
@@ -1591,6 +1619,7 @@ class CityLearnEnv(Environment, Env):
             simulate_power_outage=simulate_power_outage,
             stochastic_power_outage=stochastic_power_outage,
             stochastic_power_outage_model=stochastic_power_outage_model,
+            price_margin = self.price_margin,
             **dynamics,
         )
 

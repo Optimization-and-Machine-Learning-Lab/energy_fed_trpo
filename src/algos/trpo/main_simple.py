@@ -20,7 +20,7 @@ from src.algos.trpo.trpo import trpo_step
 from src.algos.trpo.models import Policy, Value
 from src.utils.cl_env_helper import *
 from src.utils.utils import (
-    get_env_from_config, set_seed, set_flat_params_to, get_flat_params_from, get_flat_grad_from, normal_log_density, write_log
+    get_env_from_config, set_seed, set_flat_params_to, get_flat_params_from, get_flat_grad_from, normal_log_density, write_log, init_config
 )
 from src.utils.cl_rewards import (
     Cost,
@@ -30,9 +30,26 @@ from src.utils.cl_rewards import (
     CostIneffectiveActionPenalization,
 )
 
+# ACTIVE_OBSERVATIONS = [
+#     'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
+#     'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
+# ]
+
 ACTIVE_OBSERVATIONS = [
-    'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
-    'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
+    'hour',
+    'day_type',
+    'solar_generation',
+    'net_electricity_consumption',
+    'electrical_storage_soc',
+    'non_shiftable_load',
+    'outdoor_dry_bulb_temperature',
+    'outdoor_relative_humidity',
+    'direct_solar_irradiance',
+    'direct_solar_irradiance_predicted_6h',
+    'direct_solar_irradiance_predicted_12h',
+    'direct_solar_irradiance_predicted_24h',
+    'electricity_pricing',
+    'carbon_intensity'
 ]
 
 REWARDS = {
@@ -66,10 +83,11 @@ class TRPO:
         self.training_type = training_type
         self.personalization = training_type == 'fl-personalized'
         self.noisy = noisy
+        self.best_eval_reward = -np.inf
 
         # Initialize evaluation environment (this will be fixed troughout the training)
 
-        self.eval_env = get_env_from_config(config=env_config, seed=0)
+        self.eval_env = get_env_from_config(config=env_config, seed=seed)
 
         # Extract environments characteristics
 
@@ -257,26 +275,15 @@ class TRPO:
                             self.train_running_state[i](state[i][1:])
                         )) for i in range(self.building_count)]
 
-                    ### END OF SECTION ###
-
                     done = False
                     
                     while not done:
 
                         action = [self.select_action(state[b]).detach().cpu().numpy() for b in range(self.building_count)]
 
-                        # Before doing the next state compute penalization for trying to use more energy than what's available in the battery
-
-                        # storage_pen = [(action[b] - self.train_env.buildings[b].electrical_storage.soc[self.train_env.time_step]) ** 2 for b in range(self.building_count)]
-                        # storage_pen = [(action[b] - self.train_env.buildings[b].electrical_storage.soc[-1]) ** 2 for b in range(self.building_count)]
-    
                         # Compute next step
 
-                        self.train_env.reward_function.env_metadata['last_action'] = action # Apend the last action to the reward so it can be considered in its computation
-
                         next_state, reward, done, _, _ = self.train_env.step(action)
-
-                        ### THIS LOGIC IS ADDED HERE TO AVOID MODIFYING THE STANDARD ENVIRONMENT ###
 
                         if self.personalization:
                             next_state = [np.concatenate((
@@ -296,9 +303,6 @@ class TRPO:
 
                         for b in range(self.building_count):
 
-                            # Add a storage misuse penalization to reward value in buffer
-
-                            # memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b] - storage_pen[b])
                             memories[b].push(state[b], np.array([action[b]]), mask, next_state[b], reward[b])
 
                         state = next_state
@@ -320,7 +324,6 @@ class TRPO:
                     batch += memories[b].sample()
 
                 batch = self.transition(*zip(*batch))
-                self.update_params(batch)                
 
                 # Logging
 
@@ -345,8 +348,8 @@ class TRPO:
                         train_log[f"{base_name}mean_hour_reward"] = reward_batch[b]
                         train_log[f"{base_name}mean_hour_cost"] = cost_batch[b]
                         train_log[f"{base_name}mean_hour_emission"] = emission_batch[b]
-
-                    eval_log = self.evaluation()
+                    
+                    eval_log, eval_actions, best_reward = self.evaluation()
 
                     write_log(log_path=self.logs_path, log={'Episode': i_episode, **train_log, **eval_log})                    
                     pbar.set_postfix({'Episode': i_episode, **train_log, **eval_log})
@@ -355,6 +358,40 @@ class TRPO:
 
                         wandb.log({**train_log, **eval_log}, step = int(wandb_step))
 
+                        if best_reward:
+
+                            # Prepare actions for logging
+
+                            eval_actions = np.array(eval_actions).transpose(1, 0, 2).squeeze()
+
+                            for b in range(self.building_count):
+                            
+                                actions = []
+                                socs = []
+
+                                for h in range(len(eval_actions[b])):
+
+                                    actions.append([h, eval_actions[b][h], f"learned - e {i_episode}"])
+                                    actions.append([h, self.eval_env.unwrapped.optimal_actions[b][h], f"optimal"])
+
+                                    socs.append([h, self.eval_env.unwrapped.buildings[b].electrical_storage.soc[h + 1], f"learned - e {i_episode}"])
+                                    socs.append([h, self.eval_env.unwrapped.optimal_soc[b][h], "optimal"])
+
+                                
+                                table_actions = wandb.Table(data=actions, columns=["hour", "action", "policy"])
+                                table_socs = wandb.Table(data=socs, columns=["hour", "soc", "policy"])
+
+                                wandb.log({
+                                    f"policies/b_{b + 1}": wandb.plot.line(
+                                        table_actions, x="hour", y="action", stroke="policy", title=f"Best Building {b + 1} Actions"
+                                    ),
+                                    f"socs/b_{b + 1}": wandb.plot.line(
+                                        table_socs, x="hour", y="soc", stroke="policy", title=f"Best Building {b + 1} SOC"
+                                    )
+                                }, step=int(wandb_step))
+
+                self.update_params(batch)                
+                
                 wandb_step += 1     # count training step
 
                 # Update pbar
@@ -365,6 +402,7 @@ class TRPO:
 
         done = False
         state, _ = self.eval_env.reset()
+        best_reward = False
 
         # Add encoding if enabled
 
@@ -382,11 +420,12 @@ class TRPO:
 
         ### END OF SECTION ###
 
+        actions = []
+
         while not done:
 
             action = [self.select_action(state[b], eval=True).detach().cpu().numpy() for b in range(self.building_count)]
-
-            self.eval_env.reward_function.env_metadata['last_action'] = action # Apend the last action to the reward so it can be considered in its computation
+            actions.append(action)
 
             next_state, _, done, _, _ = self.eval_env.step(action)
 
@@ -410,6 +449,11 @@ class TRPO:
 
         eval_log["eval/mean_hour_reward"] = np.mean(b_reward_mean)
 
+        if eval_log["eval/mean_hour_reward"] > self.best_eval_reward:
+
+            self.best_eval_reward = eval_log["eval/mean_hour_reward"]
+            best_reward = True
+
         for b in range(self.building_count):
 
             base_name = f"eval/b_{self.eval_env.buildings[b].name[-1]}_"
@@ -418,7 +462,7 @@ class TRPO:
             eval_log[f"{base_name}mean_hour_cost"] = b_cost_sum[b]
             eval_log[f"{base_name}mean_hour_emission"] = b_emission_sum[b]
 
-        return eval_log
+        return eval_log, actions, best_reward
 
     def save_checkpoint(self, path : str):
 
@@ -432,37 +476,6 @@ class TRPO:
         checkpoint = torch.load(path)
         self.policy_net.load_state_dict(checkpoint['policy_net'])
         self.value_net.load_state_dict(checkpoint['value_net'])
-
-
-def init_config():
-
-    torch.set_num_threads(10)
-
-    # Make sure logs folder exists
-
-    Path("./logs").mkdir(exist_ok=True)
-
-    # Get device
-
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-
-    # Set numpy print options
-
-    np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
-
-    # Set default tensor type to torch.DoubleTensor
-
-    if device == "mps":
-        torch.set_default_dtype(torch.float32)
-    else:
-        torch.set_default_dtype(torch.float64)
-
-    # Enable backcompat warnings
-
-    torch.utils.backcompat.broadcast_warning.enabled = True
-    torch.utils.backcompat.keepdim_warning.enabled = True
-
-    return device
 
 def parse_args():
 

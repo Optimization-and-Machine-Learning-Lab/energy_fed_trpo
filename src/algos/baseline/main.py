@@ -17,6 +17,7 @@ from src.utils.cl_rewards import (
 )
 
 from citylearn.agents.base import BaselineAgent
+from gymnasium.wrappers import NormalizeReward
 
 ACTIVE_OBSERVATIONS = [
     'hour',
@@ -42,6 +43,7 @@ def parse_args():
     parser.add_argument('--day-count', type=int, default=1, help='Number of days for training (default: 1)')
     parser.add_argument('--data-path', type=str, default='./data/simple_data/', help='Data path (default: ./data/simple_data)')
     parser.add_argument('--reward', type=str, help='Reward function (default: cost_pen_no_batt)')
+    parser.add_argument("--gamma", type=float, default=0.9)
 
     args = parser.parse_args()
 
@@ -105,7 +107,8 @@ if __name__ == "__main__":
 
     # initialize environment
 
-    eval_env = get_env_from_config(env_config, seed=2500) # This is the evaluation environment seed, it's fixed among the experiments to evaluate in the same day
+    eval_env = get_env_from_config(env_config, seed=args.seed)
+    eval_env = NormalizeReward(eval_env, gamma=args.gamma, epsilon=1e-8)
 
     # Define a path to create logs
 
@@ -131,9 +134,7 @@ if __name__ == "__main__":
             while not eval_env.unwrapped.terminated:
 
                 actions = model.predict(observations, deterministic=True)
-
-                eval_env.reward_function.env_metadata['last_action'] = np.array([[0] for _ in actions]) # Apend the last action to the reward so it can be considered in its computation of reward
-
+                
                 observations, reward, _, _, _ = eval_env.step(actions)
                 
             b_reward_mean = eval_env.unwrapped.episode_rewards[-1]['mean']

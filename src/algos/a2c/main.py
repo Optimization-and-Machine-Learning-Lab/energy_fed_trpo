@@ -9,7 +9,7 @@ from pathlib import Path
 
 from stable_baselines3.common.noise import NormalActionNoise
 from src.utils.utils import set_seed, write_log, get_env_from_config, init_config
-from stable_baselines3 import SAC
+from stable_baselines3 import A2C
 from src.utils.cl_rewards import *
 from src.utils.cl_env_helper import *
 from stable_baselines3.common.monitor import Monitor
@@ -18,11 +18,8 @@ from citylearn.wrappers import (
     StableBaselines3Wrapper,
 )
 from gymnasium.wrappers import NormalizeReward
+from stable_baselines3.common.vec_env import SubprocVecEnv
 
-# ACTIVE_OBSERVATIONS = [
-#     'hour', 'electrical_storage_soc', 'outdoor_dry_bulb_temperature', 'outdoor_relative_humidity',
-#     'non_shiftable_load', 'electricity_pricing', 'carbon_intensity'
-# ]
 
 ACTIVE_OBSERVATIONS = [
     'hour',
@@ -35,8 +32,6 @@ ACTIVE_OBSERVATIONS = [
     'direct_solar_irradiance_predicted_6h',
     'direct_solar_irradiance_predicted_12h',
     'direct_solar_irradiance_predicted_24h',
-    'electricity_pricing',
-    'carbon_intensity'
 ]
 
 REWARDS = {
@@ -49,14 +44,14 @@ REWARDS = {
 
 def parse_args():
 
-    parser = argparse.ArgumentParser(description='CityLearn TRPO experiment')
+    parser = argparse.ArgumentParser(description='CityLearn A2C experiment')
 
     parser.add_argument("--n_episodes", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--learning_rate", type=float, default=5e-4)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=0.9)
-    parser.add_argument("--tau", type=float, default=0.005)
+    parser.add_argument("--gae_lambda", type=float, default=1.0)
     parser.add_argument("--qf_nns", type=int, default=16)
     parser.add_argument("--pi_nns", type=int, default=32)
     parser.add_argument("--buffer_size", type=int, default=int(2e6))
@@ -113,23 +108,22 @@ if __name__ == "__main__":
         "reward_function": REWARDS[args.reward],
         "random_seed": args.seed,
         "day_count": args.day_count,
-        # "buildings": ['Building_1'],
         "extended_obs": True,
         "price_margin": args.price_margin,
     }
 
     # initialize environment
 
-    train_env = get_env_from_config(config=env_config, seed=args.seed)
+    train_env = SubprocVecEnv([get_env_from_config(config=env_config, seed=args.seed) for _ in range(args.batch_size)])
     train_env = NormalizeReward(train_env, gamma=args.gamma, epsilon=1e-8)
     train_env = NormalizedObservationWrapper(train_env)
     train_env = StableBaselines3Wrapper(train_env)
     train_env = Monitor(train_env)
 
-    eval_env = get_env_from_config(config={
+    eval_env = SubprocVecEnv([get_env_from_config(config={
         **env_config,
         "schema": eval_schema_dict,
-    }, seed=args.seed)
+    }, seed=args.seed) for _ in range(args.batch_size)])
     eval_env = NormalizeReward(eval_env, gamma=args.gamma, epsilon=1e-8)
     eval_env = NormalizedObservationWrapper(eval_env)
     eval_env = StableBaselines3Wrapper(eval_env)
@@ -141,21 +135,18 @@ if __name__ == "__main__":
 
     model_config = {
         "learning_rate": args.learning_rate,
-        "batch_size": args.batch_size,
-        "learning_starts": int(args.day_count * 24 * 0.5),
-        "train_freq": (int(args.day_count * 24 * 5), "step"),
+        # "n_steps": args.batch_size,
         "gamma": args.gamma,
-        "tau": args.tau,
-        "buffer_size": args.buffer_size,
+        "gae_lambda": args.gae_lambda,
         "device": device,
         "seed": args.seed,
         "policy_kwargs": {
             "net_arch": {
                 "pi": [args.pi_nns, args.pi_nns],
-                "qf": [args.qf_nns, args.qf_nns],
+                "vf": [args.qf_nns, args.qf_nns],
             }
         },
-        "action_noise": NormalActionNoise(mean=np.zeros(n_buildings), sigma=0.1 * np.ones(n_buildings)),
+        "normalize_advantage": True,
         # "verbose": 1,
     }
 
@@ -166,11 +157,11 @@ if __name__ == "__main__":
     if args.wandb_log:
 
         run =  wandb.init(
-            name=f"sac_seed_{args.seed}_{str(int(time()))}", 
+            name=f"a2c_seed_{args.seed}_{str(int(time()))}", 
             project="trpo_rl_energy",
             entity="optimllab",
             config={
-                "algorithm": "sac",
+                "algorithm": "a2c",
                 "seed": args.seed,
                 **model_config
             },
@@ -179,10 +170,10 @@ if __name__ == "__main__":
 
     # Define a path to create logs
 
-    logs_path = wandb.run.dir if args.wandb_log else f"./logs/sac_seed_{args.seed}_t_{str(int(time()))}"
+    logs_path = wandb.run.dir if args.wandb_log else f"./logs/a2c_seed_{args.seed}_t_{str(int(time()))}"
     Path(logs_path).mkdir(exist_ok=True)
 
-    model = SAC("MlpPolicy", train_env, **model_config)#, tensorboard_log=logs_path)
+    model = A2C("MlpPolicy", train_env, **model_config)#, tensorboard_log=logs_path)
     
     # Train the model
     
@@ -215,8 +206,8 @@ if __name__ == "__main__":
                 train_env = NormalizedObservationWrapper(train_env)
                 train_env = StableBaselines3Wrapper(train_env)
 
-                model = SAC("MlpPolicy", train_env, **model_config)
-                model.load("./models/tmp/sac", env=train_env)
+                model = A2C("MlpPolicy", train_env, **model_config)
+                model.load("./models/tmp/a2c", env=train_env)
 
             # Train the model
             model.learn(
@@ -225,7 +216,7 @@ if __name__ == "__main__":
 
             if args.noisy_training:
 
-                model.save(f"./models/tmp/sac")
+                model.save(f"./models/tmp/a2c")
 
             observations, _ = train_env.reset()
 
@@ -323,7 +314,7 @@ if __name__ == "__main__":
                                 )
                             }, step=int(wandb_step))
 
-                        # model.save(f"./models/sac_{args.seed}")
+                        # model.save(f"./models/a2c_{args.seed}")
 
             wandb_step += 1     # count training step
             
@@ -337,7 +328,7 @@ if __name__ == "__main__":
 
         # Delete the temp model
 
-        os.remove(f"./models/tmp/sac.zip")
+        os.remove(f"./models/tmp/a2c.zip")
 
     if args.wandb_log:
 

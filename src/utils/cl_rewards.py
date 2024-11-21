@@ -310,7 +310,7 @@ class Cost(RewardFunction):
     
 class WeightedCostAndEmissions(RewardFunction):
 
-    def __init__(self, env_metadata: dict[str, Any], cost_weight: float = 0.4, emissions_weight: float = 0.6):
+    def __init__(self, env_metadata: dict[str, Any]):
         r"""Initialize CustomReward.
 
         Parameters
@@ -324,8 +324,9 @@ class WeightedCostAndEmissions(RewardFunction):
         """
 
         super().__init__(env_metadata)
-        self.cost_weight = cost_weight
-        self.emissions_weight = emissions_weight
+        self.emissions_weight = 0.1
+        self.cost_weight = 1 - self.emissions_weight
+        self.last_soc = None
 
     def calculate(
         self, observations: list[dict[str, int, float]]
@@ -353,12 +354,63 @@ class WeightedCostAndEmissions(RewardFunction):
 
         reward_list = []
 
-        for o, m in zip(observations, self.env_metadata['buildings']):
-
-            cost = o['net_electricity_consumption'] * o['electricity_pricing']
+        for i, (o, m) in enumerate(zip(observations, self.env_metadata['buildings'])):
+            
+            prev_soc = self.last_soc[i]
+            battery_soc = o['electrical_storage_soc']
+            cost = max(o['net_electricity_consumption'], 0) * o['electricity_pricing']
+            cost += min(o['net_electricity_consumption'], 0) * o['electricity_pricing'] * self.env_metadata['price_margin']
             emissions = max(o['net_electricity_consumption'], 0) * o['carbon_intensity']
+            last_action = self.env_metadata['last_action']
 
-            reward = - (self.cost_weight * cost + self.emissions_weight * emissions)
-            reward_list.append(reward)
+            # Handle baseline agent
+
+            if len(last_action[0]) == 0:
+                last_action = 0.0
+            else:
+                # Handle central agent
+                last_action = last_action[0][i] if self.central_agent else last_action[i][0]
+
+            # Penalize the agent for not using the battery effectively
+            
+            # penalty = 0.0
+            # # pen_factor = 1e2
+
+            # # Penalize if charging or discharging the battery beyond battery's limits
+
+            # if (last_action > 0 and last_action > (1 - prev_soc)) or (last_action < 0 and abs(last_action) > prev_soc):
+            #     # penalty += pen_factor * (abs((1 - prev_soc) - last_action) if last_action > 0 else abs(prev_soc + last_action))
+            #     penalty += 5
+                
+            penalty = 1.0
+            pen_factor = 1000
+
+            # Penalize if charging or discharging the battery beyond battery's limits
+
+            if (last_action > 0 and last_action > (1 - prev_soc)) or (last_action < 0 and abs(last_action) > prev_soc):
+                penalty += pen_factor * (abs((1 - prev_soc) - last_action) if last_action > 0 else abs(prev_soc + last_action))
+
+            # Accumulate  penalization for not using 
+
+            penalty = -(penalty + np.sign(cost) * battery_soc)
+
+            # Compute reward
+
+            reward = -(self.cost_weight * cost + self.emissions_weight * emissions)
+            # reward = -(self.cost_weight * cost + self.emissions_weight * emissions)
+            # reward = - max(o['net_electricity_consumption'], 0)
+
+            reward_list.append(reward + penalty)
+            # reward_list.append(reward - penalty)
+            # reward_list.append(abs(reward) * penalty)
+            # if reward > 0:
+            #     reward_list.append(reward / penalty)
+            # else:
+            #     reward_list.append(penalty * reward)
+
+            # Update previous state of charge
+
+            self.last_soc[i] = o['electrical_storage_soc']
 
         return [np.mean(reward_list)] if self.central_agent else reward_list
+        # return [np.sum(reward_list)] if self.central_agent else reward_list

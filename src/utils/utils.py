@@ -46,7 +46,8 @@ def init_config():
     if device == "mps":
         torch.set_default_dtype(torch.float32)
     else:
-        torch.set_default_dtype(torch.float64)
+        torch.set_default_dtype(torch.float32)
+        # torch.set_default_dtype(torch.float64)
 
     # Enable backcompat warnings
 
