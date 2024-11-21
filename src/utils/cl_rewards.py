@@ -402,7 +402,7 @@ class WeightedCostAndEmissions(RewardFunction):
 
             reward_list.append(reward + penalty)
             # reward_list.append(reward - penalty)
-            # reward_list.append(abs(reward) * penalty)
+            reward_list.append(abs(reward) * penalty)
             # if reward > 0:
             #     reward_list.append(reward / penalty)
             # else:
