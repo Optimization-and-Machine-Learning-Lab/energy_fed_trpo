@@ -6,4 +6,5 @@ logs/
 
 # Ignore data files
 
-data/
+.env
+/data

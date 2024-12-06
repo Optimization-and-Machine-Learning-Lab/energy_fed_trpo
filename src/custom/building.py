@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 import torch
 from citylearn.base import Environment, EpisodeTracker
-from citylearn.data import EnergySimulation, CarbonIntensity, Pricing, TOLERANCE, Weather, ZERO_DIVISION_PLACEHOLDER
+from citylearn.data import EnergySimulation, CarbonIntensity, TOLERANCE, Weather, ZERO_DIVISION_PLACEHOLDER
+from src.custom.data import Pricing
 from citylearn.dynamics import Dynamics, LSTMDynamics
 from citylearn.energy_model import Battery, ElectricDevice, ElectricHeater, HeatPump, PV, StorageTank
 from citylearn.power_outage import PowerOutage
@@ -76,7 +77,8 @@ class Building(Environment):
         self, energy_simulation: EnergySimulation, weather: Weather, observation_metadata: Mapping[str, bool], action_metadata: Mapping[str, bool], episode_tracker: EpisodeTracker, carbon_intensity: CarbonIntensity = None, 
         pricing: Pricing = None, dhw_storage: StorageTank = None, cooling_storage: StorageTank = None, heating_storage: StorageTank = None, electrical_storage: Battery = None, 
         dhw_device: Union[HeatPump, ElectricHeater] = None, cooling_device: HeatPump = None, heating_device: Union[HeatPump, ElectricHeater] = None, pv: PV = None, name: str = None,
-        maximum_temperature_delta: float = None, observation_space_limit_delta: float = None, demand_observation_limit_factor: float = None, simulate_power_outage: bool = None, stochastic_power_outage: bool = None, stochastic_power_outage_model: PowerOutage = None, **kwargs: Any
+        maximum_temperature_delta: float = None, observation_space_limit_delta: float = None, demand_observation_limit_factor: float = None, simulate_power_outage: bool = None,
+        stochastic_power_outage: bool = None, stochastic_power_outage_model: PowerOutage = None, personal_encoding: list = None, **kwargs: Any
     ):  
         self.name = name
         self.dhw_storage = dhw_storage
@@ -107,9 +109,9 @@ class Building(Environment):
         self.stochastic_power_outage = stochastic_power_outage
         self.non_periodic_normalized_observation_space_limits = None
         self.periodic_normalized_observation_space_limits = None
+        self.personal_encoding = personal_encoding
         self.observation_space = self.estimate_observation_space(include_all=False, normalize=False)
         self.action_space = self.estimate_action_space()
-        self.price_margin = 0.1
 
     @property
     def energy_simulation(self) -> EnergySimulation:
@@ -925,6 +927,14 @@ class Building(Environment):
 
         else:
             pass
+        
+        # Add personal encoding to observation
+
+        if self.personal_encoding is not None:
+
+            for i, e in enumerate(self.personal_encoding):
+
+                observations[f'personal_encoding_i_{i}'] = e
 
         return observations
     
@@ -1463,6 +1473,13 @@ class Building(Environment):
         low_limit = {k: v - self.observation_space_limit_delta for k, v in low_limit.items()}
         high_limit = {k: v + self.observation_space_limit_delta for k, v in high_limit.items()}
 
+        if self.personal_encoding is not None:
+
+            for i, _ in enumerate(self.personal_encoding):
+
+                low_limit[f'personal_encoding_i_{i}'] = 0.0
+                high_limit[f'personal_encoding_i_{i}'] = 1.0
+
         return low_limit, high_limit
     
     def estimate_action_space(self) -> spaces.Box:
@@ -1900,7 +1917,7 @@ class Building(Environment):
         # net electriciy consumption cost, we added an adjustment to make it more logical (selling back to the grid should be cheaper than the selling price)
 
         self.__net_electricity_consumption_cost[self.time_step] = max(net_electricity_consumption, 0) * self.pricing.electricity_pricing[self.time_step]
-        self.__net_electricity_consumption_cost[self.time_step] += min(net_electricity_consumption, 0) * self.price_margin * self.pricing.electricity_pricing[self.time_step]
+        self.__net_electricity_consumption_cost[self.time_step] += min(net_electricity_consumption, 0) * self.pricing.selling_pricing[self.time_step]
 
         # net electriciy consumption emission
         self.__net_electricity_consumption_emission[self.time_step] = max(0.0, net_electricity_consumption*self.carbon_intensity.carbon_intensity[self.time_step])

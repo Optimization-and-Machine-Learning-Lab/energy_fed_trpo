@@ -11,14 +11,15 @@ import numpy as np
 import pandas as pd
 from citylearn import __version__ as citylearn_version
 from citylearn.base import Environment, EpisodeTracker
-from .building import Building, DynamicsBuilding
+from src.custom.building import Building, DynamicsBuilding
 from citylearn.cost_function import CostFunction
-from citylearn.data import DataSet, EnergySimulation, CarbonIntensity, Pricing, TOLERANCE, Weather
+from citylearn.data import DataSet, CarbonIntensity, TOLERANCE, Weather
+from src.custom.data import Pricing, EnergySimulation
 from citylearn.energy_model import Battery, PV
 from citylearn.reward_function import RewardFunction
 from citylearn.utilities import read_json
 
-from citylearn.preprocessing import Normalize
+from citylearn.preprocessing import OnehotEncoding
 
 LOGGER = logging.getLogger()
 logging.getLogger('matplotlib.font_manager').disabled = True
@@ -122,14 +123,14 @@ class CityLearnEnv(Environment, Env):
         central_agent: bool = None, shared_observations: List[str] = None, active_observations: Union[List[str], List[List[str]]] = None, 
         inactive_observations: Union[List[str], List[List[str]]] = None, active_actions: Union[List[str], List[List[str]]] = None, 
         inactive_actions: Union[List[str], List[List[str]]] = None, simulate_power_outage: bool = None, solar_generation: bool = None, random_seed: int = None, 
-        extended_obs: bool = False, price_margin: float = 0.1, **kwargs: Any,
+        personal_encoding: bool = False, **kwargs: Any,
     ):
         self.schema = schema
         self.__rewards = None
         self.buildings = []
         self.random_seed = random_seed
-        self.price_margin = price_margin
-        
+        self.personal_encoder = OnehotEncoding(classes=list(range(len(schema['buildings'])))) if personal_encoding else None
+
         root_directory, buildings, episode_time_steps, rolling_episode_split, random_episode_split, \
             seconds_per_time_step, reward_function, central_agent, shared_observations, episode_tracker = self._load(
                 deepcopy(self.schema),
@@ -155,7 +156,6 @@ class CityLearnEnv(Environment, Env):
             )
         self.root_directory = root_directory
         self.buildings = buildings
-        self.extended_obs = extended_obs
 
         # now call super class initialization and set episode tracker now that buildings are set
         super().__init__(seconds_per_time_step=seconds_per_time_step, random_seed=self.random_seed, episode_tracker=episode_tracker)
@@ -177,42 +177,21 @@ class CityLearnEnv(Environment, Env):
 
         for csv_file in sorted(Path(self.root_directory).glob("sol_*.csv")):
 
+            # We shift one step form the reference start and end of the episode as we need to start from the first action and SoC
+
             df = pd.read_csv(csv_file)
-            self.optimal_actions.append(df['batt'].values[episode_tracker.simulation_start_time_step + 1 : episode_tracker.simulation_end_time_step + 1])
-            self.optimal_soc.append(df['soc'].values[episode_tracker.simulation_start_time_step + 1 : episode_tracker.simulation_end_time_step + 1])
+            self.optimal_actions.append(
+                df['action'].values[episode_tracker.simulation_start_time_step + 1: episode_tracker.simulation_end_time_step + 1]
+            )
+            
+            # We add the initial state of the battery (starting discharged)
 
-        # Prepare extended observations information
+            initial_soc = 0
 
-        if self.extended_obs:
+            self.optimal_soc.append(
+                np.insert(df['soc'].values[episode_tracker.simulation_start_time_step + 1: episode_tracker.simulation_end_time_step + 1], 0, initial_soc)
+            )
 
-            # Read prediction files from root directory
-
-            self.pred_files = []
-
-            for csv_file in sorted(Path(self.root_directory).glob("pred_*.csv")):
-                
-                df = pd.read_csv(csv_file)
-                self.pred_files.append(df.values)
-
-            self.len_extra_obs = self.pred_files[0].shape[1]
-
-            # Create normalizers
-
-            self.normalizers = []
-            self.extended_obs_low = []
-            self.extended_obs_high = []
-
-            for f in self.pred_files:
-
-                self.normalizers.append(Normalize(x_min=f.min(), x_max=f.max()))
-
-                if self.central_agent:
-                    self.extended_obs_low.extend([f.min()] * 4)
-                    self.extended_obs_high.extend([f.max()] * 4)
-                else:
-                    self.extended_obs_low.append([f.min()] * 4)
-                    self.extended_obs_high.append([f.max()] * 4)
-        
         # reset environment and initializes episode time steps
         self.reset()
 
@@ -359,24 +338,12 @@ class CityLearnEnv(Environment, Env):
                     else:
                         pass
 
-            if self.extended_obs:
-                low_limit.extend(self.extended_obs_low)
-                high_limit.extend(self.extended_obs_high)
-
             observation_space = [spaces.Box(low=np.array(low_limit), high=np.array(high_limit), dtype=np.float32)]
         
         else:
             
-            if self.extended_obs:
-
-                observation_space = [spaces.Box(
-                    low=np.array(b.observation_space.low.tolist() + self.extended_obs_low[i]), 
-                    high=np.array(b.observation_space.high.tolist() + self.extended_obs_high[i]), 
-                    dtype=np.float32)
-                for i, b in enumerate(self.buildings)]
-            else:
-                observation_space = [b.observation_space for b in self.buildings]
-        
+            observation_space = [b.observation_space for b in self.buildings]
+            
         return observation_space
 
     @property
@@ -860,7 +827,6 @@ class CityLearnEnv(Environment, Env):
             'central_agent': self.central_agent,
             'shared_observations': self.shared_observations,
             'buildings': [b.get_metadata() for b in self.buildings],
-            'price_margin': self.price_margin,
         }
 
     @staticmethod
@@ -883,9 +849,8 @@ class CityLearnEnv(Environment, Env):
             'direct_solar_irradiance', 'direct_solar_irradiance_predicted_6h',
             'direct_solar_irradiance_predicted_12h', 'direct_solar_irradiance_predicted_24h',
             'carbon_intensity', 'electricity_pricing', 'electricity_pricing_predicted_6h',
-            'electricity_pricing_predicted_12h', 'electricity_pricing_predicted_24h',
+            'electricity_pricing_predicted_12h', 'electricity_pricing_predicted_24h'
         ]
-
 
     def step(self, actions: List[List[float]]) -> Tuple[List[List[float]], List[float], bool, bool, dict]:
         """Advance to next time step then apply actions to `buildings` and update variables.
@@ -951,22 +916,8 @@ class CityLearnEnv(Environment, Env):
 
         else:
             pass
-        
-        if self.extended_obs:
-            
-            real_step = self.episode_tracker.simulation_start_time_step + self.time_step
 
-            load_preds = np.array([self.pred_files[i][real_step] * self.normalizers[i] for i in range(len(self.pred_files))], dtype=self.pred_files[0].dtype)
-
-            if self.central_agent:
-
-                extended_obs = [np.concatenate([self.observations[0], load_preds.flatten()])]
-
-            else:
-
-                extended_obs = [np.concatenate([o, load_preds[i]]) for i, o in enumerate(self.observations)]
-
-        return self.observations if not self.extended_obs else extended_obs, reward, self.terminated, self.truncated, self.get_info()
+        return self.observations, reward, self.terminated, self.truncated, self.get_info()
 
     def get_info(self) -> Mapping[Any, Any]:
         """Other information to return from the `citylearn.CityLearnEnv.step` function."""
@@ -1266,33 +1217,6 @@ class CityLearnEnv(Environment, Env):
         # Initialize the SoC in reward function
 
         self.reward_function.last_soc = [b.electrical_storage.soc[self.time_step] for b in self.buildings]
-        
-        if self.extended_obs:
-
-            load_preds = np.array([self.pred_files[i][0] * self.normalizers[i] for i in range(len(self.pred_files))], dtype=self.pred_files[0].dtype)
-
-            if self.central_agent:
-
-                extended_obs = [np.concatenate([self.observations[0], load_preds.flatten()])]
-
-            else:
-
-                extended_obs = [np.concatenate([o, load_preds[i]]) for i, o in enumerate(self.observations)]
-
-        if self.extended_obs:
-
-            load_preds = np.array([self.pred_files[i][0] * self.normalizers[i] for i in range(len(self.pred_files))], dtype=self.pred_files[0].dtype)
-
-            if self.central_agent:
-
-                extended_obs = [np.concatenate([self.observations[0], load_preds.flatten()])]
-
-            else:
-
-                extended_obs = [np.concatenate([o, load_preds[i]]) for i, o in enumerate(self.observations)]
-
-            return extended_obs, self.get_info()
-
 
         return self.observations, self.get_info()
 
@@ -1562,7 +1486,7 @@ class CityLearnEnv(Environment, Env):
         action_metadata = {k: False if k in inactive_actions else v for k, v in action_metadata.items()}
 
         # construct building
-        building_type = 'citylearn.citylearn.Building' if building_schema.get('type', None) is None else building_schema['type']
+        building_type = 'src.custom.building.Building' if building_schema.get('type', None) is None else building_schema['type']
         building_type_module = '.'.join(building_type.split('.')[0:-1])
         building_type_name = building_type.split('.')[-1]
         building_constructor = getattr(importlib.import_module(building_type_module),building_type_name)
@@ -1619,7 +1543,7 @@ class CityLearnEnv(Environment, Env):
             simulate_power_outage=simulate_power_outage,
             stochastic_power_outage=stochastic_power_outage,
             stochastic_power_outage_model=stochastic_power_outage_model,
-            price_margin = self.price_margin,
+            personal_encoding= [*(index * self.personal_encoder)] if self.personal_encoder is not None else None,
             **dynamics,
         )
 
