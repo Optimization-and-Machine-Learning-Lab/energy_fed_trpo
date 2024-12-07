@@ -30,22 +30,32 @@ from citylearn.wrappers import (
 )
 
 def plot_rewards_and_actions(
-    policy, train_env, eval_env, train_rewards, eval_rewards, save: bool = False,
-    save_path: str = None, wandb_log: bool = False
+    policy, train_env, eval_env, summary, save: bool = False, save_path: str = None
 ):
 
-    # Setup the logger
+    # Extract the rewards, costs, and emissions
 
+    train_rewards = summary['train']['reward']
+    train_costs = summary['train']['cost']
+    train_costs_without_storage = summary['train']['cost_without_storage']
+    train_emissions = summary['train']['emissions']
+    train_emissions_without_storage = summary['train']['emissions_without_storage']
+
+    eval_rewards = summary['eval']['reward']
+    eval_costs = summary['eval']['cost']
+    eval_costs_without_storage = summary['eval']['cost_without_storage']
+    eval_emissions = summary['eval']['emissions']
+    eval_emissions_without_storage = summary['eval']['emissions_without_storage']
+
+    # Setup the logger
     logger = GeneralLogger()
 
     # Manage the case when we call the logger from a notebook (not Wandb logging)
-
     if not logger._initialized:
         logger.setup({}) # Init by default
 
-    # Plot rewards and actions
-
-    fig, axs = plt.subplots(2, 3, figsize=(18, 8))
+    # Plot rewards, costs, and emissions
+    fig, axs = plt.subplots(1 + 2 * train_env.n_agents, 3, figsize=(18, 8 + 4 * train_env.n_agents))
 
     # Plot rewards
     axs[0, 0].plot(train_rewards, label="Training Reward Mean")
@@ -63,11 +73,50 @@ def plot_rewards_and_actions(
         keys=['Train', 'Eval'],
         title='Rewards',
         x_name='Epochs'
-    ) 
+    )
+
+    # Plot costs
+    axs[0, 1].plot(train_costs, label="Training Cost Mean")
+    axs[0, 1].plot(train_costs_without_storage, label="Training Cost Mean Without Storage", linestyle="--")
+    axs[0, 1].plot(eval_costs, label="Evaluation Cost Mean")
+    axs[0, 1].plot(eval_costs_without_storage, label="Evaluation Cost Mean Without Storage", linestyle="--")
+    axs[0, 1].set_xlabel("Training Iterations")
+    axs[0, 1].set_ylabel("Cost")
+    axs[0, 1].set_title("Training and Evaluation Costs")
+    axs[0, 1].grid()
+    axs[0, 1].legend()
+
+    logger.log_line_series(
+        name='global/costs',
+        xs=list(range(len(train_costs))),
+        ys=[train_costs, train_costs_without_storage, eval_costs, eval_costs_without_storage],
+        keys=['Train', 'Train Without Storage', 'Eval', 'Eval Without Storage'],
+        title='Costs',
+        x_name='Epochs'
+    )
+
+    # Plot emissions
+    axs[0, 2].plot(train_emissions, label="Training Emissions Mean")
+    axs[0, 2].plot(train_emissions_without_storage, label="Training Emissions Mean Without Storage", linestyle="--")
+    axs[0, 2].plot(eval_emissions, label="Evaluation Emissions Mean")
+    axs[0, 2].plot(eval_emissions_without_storage, label="Evaluation Emissions Mean Without Storage", linestyle="--")
+    axs[0, 2].set_xlabel("Training Iterations")
+    axs[0, 2].set_ylabel("Emissions")
+    axs[0, 2].set_title("Training and Evaluation Emissions")
+    axs[0, 2].grid()
+    axs[0, 2].legend()
+
+    logger.log_line_series(
+        name='global/emissions',
+        xs=list(range(len(train_emissions))),
+        ys=[train_emissions, train_emissions_without_storage, eval_emissions, eval_emissions_without_storage],
+        keys=['Train', 'Train Without Storage', 'Eval', 'Eval Without Storage'],
+        title='Emissions',
+        x_name='Epochs'
+    )
 
     # Sample actions for train_env and eval_env
     with torch.no_grad():
-        
         train_rollout = train_env.rollout(train_env.cl_env.unwrapped.time_steps - 1, policy=policy)
         train_actions = train_rollout.get(train_env.action_key).cpu().squeeze()
         train_soc = [b.electrical_storage.soc for b in train_env.cl_env.unwrapped.buildings]
@@ -83,37 +132,31 @@ def plot_rewards_and_actions(
         eval_opt_soc = torch.tensor(np.array(eval_env.cl_env.unwrapped.optimal_soc), requires_grad=False).swapaxes(0, 1)
 
     for i in range(train_env.n_agents):
-        
-        # Plot actions for each building
-        
-        axs[0, 1].plot(train_actions[:, i].numpy(), label=f"Train Agent {i} actions")
-        axs[0, 1].plot(train_opt_actions[:, i], label=f"Train Agent {i} optimal actions", linestyle="--")
+        # Plot train data for each building
+        row = 1 + i
+        axs[row, 0].plot(train_net_electricity_consumption[i], label=f"Train Agent {i} Net Electricity Consumption")
+        axs[row, 0].set_xlabel("Hour of the day")
+        axs[row, 0].set_ylabel("Net Electricity Consumption")
+        axs[row, 0].set_title(f"Train Net Electricity Consumption Building {i}")
+        axs[row, 0].grid()
+        axs[row, 0].legend()
 
         logger.log_line_series(
-            name=f'train/actions_building_{i}',
-            xs=list(range(len(train_actions[:, i]))),
-            ys=[train_actions[:, i], train_opt_actions[:, i]],
-            keys=['Best Policy', 'Optimal'],
-            title=f'Actions Building {i}',
-            x_name='Hours'
-        )
-        
-        axs[0, 2].plot(eval_actions[:, i].numpy(), label=f"Eval Agent {i} actions")
-        axs[0, 2].plot(eval_opt_actions[:, i], label=f"Eval Agent {i} optimal actions", linestyle="--")
-
-        logger.log_line_series(
-            name=f'eval/actions_building_{i}',
-            xs=list(range(len(eval_actions[:, i]))),
-            ys=[eval_actions[:, i], eval_opt_actions[:, i]],
-            keys=['Best Policy', 'Optimal'],
-            title=f'Actions Building {i}',
+            name=f'train/net_building_{i}',
+            xs=list(range(len(train_net_electricity_consumption[i]))),
+            ys=[train_net_electricity_consumption[i]],
+            keys=['Train'],
+            title=f'Net Energy Building {i}',
             x_name='Hours'
         )
 
-        # Plot SOC for each building
-        
-        axs[1, 1].plot(train_soc[i], label=f"Train Agent {i} SOC")
-        axs[1, 1].plot(train_opt_soc[:, i], label=f"Train Agent {i} optimal SOC", linestyle="--")
+        axs[row, 1].plot(train_soc[i], label=f"Train Agent {i} SOC")
+        axs[row, 1].plot(train_opt_soc[:, i], label=f"Train Agent {i} optimal SOC", linestyle="--")
+        axs[row, 1].set_xlabel("Hour of the day")
+        axs[row, 1].set_ylabel("SOC")
+        axs[row, 1].set_title(f"Train SOC Comparison Building {i}")
+        axs[row, 1].grid()
+        axs[row, 1].legend()
 
         logger.log_line_series(
             name=f'train/soc_building_{i}',
@@ -124,8 +167,48 @@ def plot_rewards_and_actions(
             x_name='Hours'
         )
 
-        axs[1, 2].plot(eval_soc[i], label=f"Eval Agent {i} SOC")
-        axs[1, 2].plot(eval_opt_soc[:, i], label=f"Eval Agent {i} optimal SOC", linestyle="--")
+        axs[row, 2].plot(train_actions[:, i].numpy(), label=f"Train Agent {i} actions")
+        axs[row, 2].plot(train_opt_actions[:, i], label=f"Train Agent {i} optimal actions", linestyle="--")
+        axs[row, 2].set_xlabel("Hour of the day")
+        axs[row, 2].set_ylabel("Action")
+        axs[row, 2].set_title(f"Train Actions Comparison Building {i}")
+        axs[row, 2].grid()
+        axs[row, 2].legend()
+
+        logger.log_line_series(
+            name=f'train/actions_building_{i}',
+            xs=list(range(len(train_actions[:, i]))),
+            ys=[train_actions[:, i], train_opt_actions[:, i]],
+            keys=['Best Policy', 'Optimal'],
+            title=f'Actions Building {i}',
+            x_name='Hours'
+        )
+
+        # Plot eval data for each building
+        row = 1 + train_env.n_agents + i
+        axs[row, 0].plot(eval_net_electricity_consumption[i], label=f"Eval Agent {i} Net Electricity Consumption")
+        axs[row, 0].set_xlabel("Hour of the day")
+        axs[row, 0].set_ylabel("Net Electricity Consumption")
+        axs[row, 0].set_title(f"Eval Net Electricity Consumption Building {i}")
+        axs[row, 0].grid()
+        axs[row, 0].legend()
+
+        logger.log_line_series(
+            name=f'eval/net_building_{i}',
+            xs=list(range(len(eval_net_electricity_consumption[i]))),
+            ys=[eval_net_electricity_consumption[i]],
+            keys=['Eval'],
+            title=f'Net Energy Building {i}',
+            x_name='Hours'
+        )
+
+        axs[row, 1].plot(eval_soc[i], label=f"Eval Agent {i} SOC")
+        axs[row, 1].plot(eval_opt_soc[:, i], label=f"Eval Agent {i} optimal SOC", linestyle="--")
+        axs[row, 1].set_xlabel("Hour of the day")
+        axs[row, 1].set_ylabel("SOC")
+        axs[row, 1].set_title(f"Eval SOC Comparison Building {i}")
+        axs[row, 1].grid()
+        axs[row, 1].legend()
 
         logger.log_line_series(
             name=f'eval/soc_building_{i}',
@@ -135,62 +218,31 @@ def plot_rewards_and_actions(
             title=f'SoC Building {i}',
             x_name='Hours'
         )
-    
-        # Plot net electricity consumption for each building
-        
-        axs[1, 0].plot(train_net_electricity_consumption[i], label=f"Train Agent {i} Net Electricity Consumption")
-        axs[1, 0].plot(eval_net_electricity_consumption[i], label=f"Eval Agent {i} Net Electricity Consumption", linestyle="--")
+
+        axs[row, 2].plot(eval_actions[:, i].numpy(), label=f"Eval Agent {i} actions")
+        axs[row, 2].plot(eval_opt_actions[:, i], label=f"Eval Agent {i} optimal actions", linestyle="--")
+        axs[row, 2].set_xlabel("Hour of the day")
+        axs[row, 2].set_ylabel("Action")
+        axs[row, 2].set_title(f"Eval Actions Comparison Building {i}")
+        axs[row, 2].grid()
+        axs[row, 2].legend()
 
         logger.log_line_series(
-            name=f'eval/net_building_{i}',
-            xs=list(range(len(train_net_electricity_consumption[i]))),
-            ys=[train_net_electricity_consumption[i], eval_net_electricity_consumption[i]],
-            keys=['Train', 'Eval'],
-            title=f'Net Energy Building {i}',
+            name=f'eval/actions_building_{i}',
+            xs=list(range(len(eval_actions[:, i]))),
+            ys=[eval_actions[:, i], eval_opt_actions[:, i]],
+            keys=['Best Policy', 'Optimal'],
+            title=f'Actions Building {i}',
             x_name='Hours'
         )
-
-    # Configure plots, labels and titles
-
-    axs[0, 1].set_xlabel("Hour of the day")
-    axs[0, 1].set_ylabel("Action")
-    axs[0, 1].set_title("Train Actions Comparison")
-    axs[0, 1].grid()
-    axs[0, 1].legend()
-
-    axs[0, 2].set_xlabel("Hour of the day")
-    axs[0, 2].set_ylabel("Action")
-    axs[0, 2].set_title("Eval Actions Comparison")
-    axs[0, 2].grid()
-    axs[0, 2].legend()
-
-    axs[1, 1].set_xlabel("Hour of the day")
-    axs[1, 1].set_ylabel("SOC")
-    axs[1, 1].set_title("Train SOC Comparison")
-    axs[1, 1].grid()
-    axs[1, 1].legend()
-
-    axs[1, 2].set_xlabel("Hour of the day")
-    axs[1, 2].set_ylabel("SOC")
-    axs[1, 2].set_title("Eval SOC Comparison")
-    axs[1, 2].grid()
-    axs[1, 2].legend()
-
-    axs[1, 0].set_xlabel("Hour of the day")
-    axs[1, 0].set_ylabel("Net Electricity Consumption")
-    axs[1, 0].set_title("Net Electricity Consumption Comparison")
-    axs[1, 0].grid()
-    axs[1, 0].legend()
 
     plt.suptitle(f'Results for day {train_env.cl_env.unwrapped.episode_tracker.episode_start_time_step // 24}')
     plt.tight_layout()
 
-    # Plot only is there is a graphical interface
-
+    # Plot only if there is a graphical interface
     plt.show()
 
     # Consider saving the figure
-
     if save:
         fig.savefig(save_path + 'results.png')
 
@@ -228,6 +280,7 @@ class CityLearnMultiAgentEnv(EnvBase):
         action_specs = []
         observation_specs = []
         reward_specs = []
+        info_specs = []
         
         cl_env_as = self.cl_env.action_space
         cl_env_os = self.cl_env.observation_space
@@ -251,6 +304,12 @@ class CityLearnMultiAgentEnv(EnvBase):
                 shape=cl_env_os[i].shape,
                 device=device
             ))
+            info_specs.append({
+                "cost": Unbounded(shape=(1,), dtype=torch.float, device=device),
+                "cost_without_storage": Unbounded(shape=(1,), dtype=torch.float, device=device),
+                "emissions": Unbounded(shape=(1,), dtype=torch.float, device=device),
+                "emissions_without_storage": Unbounded(shape=(1,), dtype=torch.float, device=device),
+            })
 
         # Define observation and action spaces
 
@@ -284,14 +343,46 @@ class CityLearnMultiAgentEnv(EnvBase):
 
         self.observation_spec = Composite({
             "agents": Composite(
-                {"observation": torch.stack(observation_specs, dim=0).expand(self.batch_size[0], self.n_agents, cl_env_os[0].shape[0])},
+                {
+                    "observation": torch.stack(observation_specs, dim=0).expand(self.batch_size[0], self.n_agents, cl_env_os[0].shape[0]),
+                    "info": Composite({
+                        "cost": torch.stack(
+                            [s["cost"] for s in info_specs], dim=0
+                        ).view(self.batch_size[0], self.n_agents, 1),
+                        "cost_without_storage": torch.stack(
+                            [s["cost_without_storage"] for s in info_specs], dim=0
+                        ).view(self.batch_size[0], self.n_agents, 1),
+                        "emissions": torch.stack(
+                            [s["emissions"] for s in info_specs], dim=0
+                        ).view(self.batch_size[0], self.n_agents, 1),
+                        "emissions_without_storage": torch.stack(
+                            [s["emissions_without_storage"] for s in info_specs], dim=0
+                        ).view(self.batch_size[0], self.n_agents, 1),
+                    }, shape=(self.batch_size[0], self.n_agents,))
+                },
                 shape=(self.batch_size[0], self.n_agents,)
             )
         }, batch_size=self.batch_size)
 
         self.unbatched_observation_spec = Composite({
             "agents": Composite(
-                {"observation": torch.stack(observation_specs, dim=0).expand(self.n_agents, cl_env_os[0].shape[0])},
+                {
+                    "observation": torch.stack(observation_specs, dim=0).expand(self.n_agents, cl_env_os[0].shape[0]),
+                    "info": Composite({
+                        "cost": torch.stack(
+                            [s["cost"] for s in info_specs], dim=0
+                        ).view(self.n_agents, 1),
+                        "cost_without_storage": torch.stack(
+                            [s["cost_without_storage"] for s in info_specs], dim=0
+                        ).view(self.n_agents, 1),
+                        "emissions": torch.stack(
+                            [s["emissions"] for s in info_specs], dim=0
+                        ).view(self.n_agents, 1),
+                        "emissions_without_storage": torch.stack(
+                            [s["emissions_without_storage"] for s in info_specs], dim=0
+                        ).view(self.n_agents, 1),
+                    }, shape=(self.n_agents,))
+                },
                 shape=(self.n_agents,)
             )
         })
@@ -303,13 +394,27 @@ class CityLearnMultiAgentEnv(EnvBase):
         self.done = False
 
     def _reset(self, tensordict=None):
-        observations, _ = self.cl_env.reset()
+        observations, info = self.cl_env.reset()
         tensordict = TensorDict({
             "agents": TensorDict({
                 # "info": torch.empty(self.batch_size),
                 "observation": torch.tensor(
                     np.array(observations), dtype=torch.float
                 ).reshape(self.batch_size[0], len(observations), len(observations[0])),
+                "info": {
+                    "cost": torch.tensor(
+                        info['cost'], dtype=torch.float
+                    ).reshape(self.batch_size[0], self.n_agents, 1),
+                    "cost_without_storage": torch.tensor(
+                        info["cost_without_storage"], dtype=torch.float
+                    ).reshape(self.batch_size[0], self.n_agents, 1),
+                    "emissions": torch.tensor(
+                        info["emissions"], dtype=torch.float
+                    ).reshape(self.batch_size[0], self.n_agents, 1),
+                    "emissions_without_storage": torch.tensor(
+                        info["emissions_without_storage"], dtype=torch.float
+                    ).reshape(self.batch_size[0], self.n_agents, 1),
+                },
             }, torch.Size((self.batch_size[0], self.n_agents)), device=self.device),
             "done": torch.tensor(False, dtype=torch.bool).repeat(*self.batch_size)
         }, batch_size=self.batch_size, device=self.device)
@@ -319,7 +424,7 @@ class CityLearnMultiAgentEnv(EnvBase):
     def _step(self, tensordict):
        
         # Step through the environment
-        next_obs, rewards, done, _, _ = self.cl_env.step(tensordict['agents','action'].cpu().squeeze(0).numpy())
+        next_obs, rewards, done, _, info = self.cl_env.step(tensordict['agents','action'].cpu().squeeze(0).numpy())
         self.done = done
 
         # Prepare TensorDict for the step
@@ -331,7 +436,20 @@ class CityLearnMultiAgentEnv(EnvBase):
                 "observation": torch.tensor(
                     np.array(next_obs), dtype=torch.float
                 ).reshape(self.batch_size[0], self.n_agents, self.n_observations),
-                # "info": torch.empty(self.batch_size),
+                "info": {
+                    "cost": torch.tensor(
+                        info["cost"], dtype=torch.float
+                    ).reshape(self.batch_size[0], self.n_agents, 1),
+                    "cost_without_storage": torch.tensor(
+                        info["cost_without_storage"], dtype=torch.float
+                    ).reshape(self.batch_size[0], self.n_agents, 1),
+                    "emissions": torch.tensor(
+                        info["emissions"], dtype=torch.float
+                    ).reshape(self.batch_size[0], self.n_agents, 1),
+                    "emissions_without_storage": torch.tensor(
+                        info["emissions_without_storage"], dtype=torch.float
+                    ).reshape(self.batch_size[0], self.n_agents, 1),
+                },
             }, batch_size=torch.Size((self.batch_size[0], self.n_agents)), device=self.device),
             "done": torch.tensor(done, dtype=torch.bool).repeat(*self.batch_size)
         }, batch_size=self.batch_size, device=self.device)

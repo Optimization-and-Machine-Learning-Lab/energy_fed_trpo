@@ -181,8 +181,29 @@ def create_loss_module(policy, critic, env, clip_epsilon, entropy_eps, gamma, lm
     return loss_module
 
 def train_policy(
-    policy, env, eval_env, n_iters, local_epochs, collector, loss_module, replay_buffer, frames_per_batch, minibatch_size, max_grad_norm, optim, 
+    policy, env, eval_env, n_iters, local_epochs, collector, loss_module, replay_buffer, frames_per_batch, minibatch_size,
+    max_grad_norm, optim, logger
 ):
+
+    summary = {
+        "train": {
+            "reward": [],
+            "loss_objective": [],
+            "loss_critic": [],
+            "loss_entropy": [],
+            "cost": [],
+            "cost_without_storage": [],
+            "emissions": [],
+            "emissions_without_storage": [],
+        },
+        "eval": {
+            "reward": [],
+            "cost": [],
+            "cost_without_storage": [],
+            "emissions": [],
+            "emissions_without_storage": [],
+        }
+    }
 
     episode_reward_mean_list = []
     episode_reward_mean_list_eval = []
@@ -283,23 +304,36 @@ def train_policy(
 
                 for rollout in eval_collector:
 
-                    # Add done to the rollout
-
-                    rollout.set(
-                        ("next", "agents", "done"),
-                        rollout.get(("next", "done"))
-                        .unsqueeze(-1)
-                        .repeat(1, 1, env.n_agents)
-                        .unsqueeze(-1)
-                        .expand(rollout.get_item_shape(("next", env.reward_key))),
-                    )
+                    done = rollout.get(
+                        ("next", "done")
+                    ).unsqueeze(-1).repeat(1, 1, env.n_agents).unsqueeze(-1).expand(rollout.get_item_shape(("next", env.reward_key)))
 
                     # Compute mean reward
 
-                    done = rollout.get(("next", "agents", "done"))
-
                     episode_reward_mean_eval = rollout.get(("next", "agents", "episode_reward"))[done].mean().item()
-                    episode_reward_mean_list_eval.append(episode_reward_mean_eval)
+
+                    # Compute mean cost and emissions
+
+                    cost_eval = rollout.get(
+                        ("next", "agents", "info", "cost")
+                    )[done].mean().item()
+                    cost_without_storage_eval = rollout.get(
+                        ("next", "agents", "info", "cost_without_storage")
+                    )[done].mean().item()
+                    emissions_eval = rollout.get(
+                        ("next", "agents", "info", "emissions")
+                    )[done].mean().item()
+                    emissions_without_storage_eval = rollout.get(
+                        ("next", "agents", "info", "emissions_without_storage")
+                    )[done].mean().item()
+
+                    # Add to the output
+
+                    summary["eval"]["reward"].append(episode_reward_mean_eval)
+                    summary["eval"]["cost"].append(cost_eval)
+                    summary["eval"]["cost_without_storage"].append(cost_without_storage_eval)
+                    summary["eval"]["emissions"].append(emissions_eval)
+                    summary["eval"]["emissions_without_storage"].append(emissions_without_storage_eval)
 
                 policy.train()
 
@@ -310,15 +344,41 @@ def train_policy(
                 best_eval_reward = episode_reward_mean_eval
                 best_policy = copy.deepcopy(policy)
 
-            # Logging
+            # Get train metrics
 
             done = tensordict_data.get(("next", "agents", "done"))
+
+            # Compute mean reward
 
             episode_reward_mean = (
                 tensordict_data.get(("next", "agents", "episode_reward"))[done].mean().item()
             )
 
-            episode_reward_mean_list.append(episode_reward_mean)
+            # Compute mean cost and emissions
+
+            cost = tensordict_data.get(
+                ("next", "agents", "info", "cost")
+            )[done].mean().item()
+            cost_without_storage = tensordict_data.get(
+                ("next", "agents", "info", "cost_without_storage")
+            )[done].mean().item()
+            emissions = tensordict_data.get(
+                ("next", "agents", "info", "emissions")
+            )[done].mean().item()
+            emissions_without_storage = tensordict_data.get(
+                ("next", "agents", "info", "emissions_without_storage")
+            )[done].mean().item()
+
+            # Add to the output
+
+            summary["train"]["reward"].append(episode_reward_mean)
+            summary["train"]["loss_objective"].append(loss_metrics["train/loss_objective"])
+            summary["train"]["loss_critic"].append(loss_metrics["train/loss_critic"])
+            summary["train"]["loss_entropy"].append(loss_metrics["train/loss_entropy"])
+            summary["train"]["cost"].append(cost)
+            summary["train"]["cost_without_storage"].append(cost_without_storage)
+            summary["train"]["emissions"].append(emissions)
+            summary["train"]["emissions_without_storage"].append(emissions_without_storage)
 
             # Log with the experiment logger
 
@@ -326,7 +386,15 @@ def train_policy(
                 {
                     **loss_metrics,
                     "train/reward_mean": episode_reward_mean,
+                    "train/cost_mean": cost,
+                    "train/cost_without_storage": cost_without_storage,
+                    "train/emissions_mean": emissions,
+                    "train/emissions_without_storage": emissions_without_storage,
                     "eval/reward_mean": episode_reward_mean_eval,
+                    "eval/cost_mean": cost_eval,
+                    "eval/cost_without_storage": cost_without_storage_eval,
+                    "eval/emissions_mean": emissions_eval,
+                    "eval/emissions_without_storage": emissions_without_storage_eval
                 },
                 step=episode,
             )
@@ -336,7 +404,7 @@ def train_policy(
             pbar.set_description(f"episode: {episode}, reward_mean: {episode_reward_mean}, eval_reward_mean: {episode_reward_mean_eval}")
             pbar.update()
 
-    return best_policy, episode_reward_mean_list, episode_reward_mean_list_eval
+    return best_policy, summary
 
 def parse_args():
 
@@ -413,6 +481,7 @@ if __name__ == '__main__':
         reward=args.reward,
         seed=args.seed,
         day_count=args.day_count,
+        device=args.device,
         gpu_device_ix=args.gpu_device_ix,
         personal_encoding=args.personal_encoding
     )
@@ -444,7 +513,7 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(params=loss_module.parameters(), lr=args.learning_rate)
 
     # Train policy
-    policy, reward_mean_list, eval_reward_mean_list = train_policy(
+    policy, summary = train_policy(
         env=train_env,
         policy=policy,
         eval_env=eval_env,
@@ -457,6 +526,7 @@ if __name__ == '__main__':
         minibatch_size=minibatch_size,
         max_grad_norm=args.max_grad_norm,
         optim=optim,
+        logger=logger
     )
 
     # Plot rewards and actions with the correct methods
@@ -465,11 +535,9 @@ if __name__ == '__main__':
         policy=policy,
         train_env=train_env,
         eval_env=eval_env,
-        train_rewards=reward_mean_list,
-        eval_rewards=eval_reward_mean_list,
+        summary=summary,
         save=True,
         save_path=logging_path,
-        wandb_log=args.wandb_logging,
     )
 
     # Close the logger

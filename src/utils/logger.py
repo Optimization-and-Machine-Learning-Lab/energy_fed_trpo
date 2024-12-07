@@ -21,7 +21,7 @@ class GeneralLogger:
         self.wdb_log = False
         self.csv_log = False
         self.console_log = False
-        self.logging_path = './logs'
+        self.logging_path = './logs/'
         self.exp_config = None
 
     def setup(self, config):

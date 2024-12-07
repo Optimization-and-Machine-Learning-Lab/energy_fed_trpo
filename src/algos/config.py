@@ -35,6 +35,7 @@ def get_exp_envs(data_path: str = "data/naive_data/", **kwargs):
     reward = kwargs.get("reward", "cost")
     seed = kwargs.get("seed", 0)
     day_count = kwargs.get("day_count", 1)
+    device = kwargs.get("device", "cpu")
     gpu_device_ix = kwargs.get("gpu_device_ix", 0)
     personal_encoding = kwargs.get("personal_encoding", False)
 
@@ -42,7 +43,7 @@ def get_exp_envs(data_path: str = "data/naive_data/", **kwargs):
 
     device = (
         torch.device(gpu_device_ix)
-        if torch.cuda.is_available() and not is_fork and not kwargs.get("device", "cpu") != "cpu"
+        if torch.cuda.is_available() and not is_fork and device != "cpu"
         else torch.device("cpu")
     )
 

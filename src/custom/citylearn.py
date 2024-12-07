@@ -922,7 +922,20 @@ class CityLearnEnv(Environment, Env):
     def get_info(self) -> Mapping[Any, Any]:
         """Other information to return from the `citylearn.CityLearnEnv.step` function."""
 
-        return {}
+        return {
+            "cost": [
+                sum(b.net_electricity_consumption_cost) for b in self.buildings
+            ],
+            "cost_without_storage": [
+                sum(b.net_electricity_consumption_cost_without_storage) for b in self.buildings
+            ],
+            "emissions": [
+                sum(b.net_electricity_consumption_emission) for b in self.buildings
+            ],
+            "emissions_without_storage": [
+                sum(b.net_electricity_consumption_emission_without_storage) for b in self.buildings
+            ],
+        }
 
     def _parse_actions(self, actions: List[List[float]]) -> List[Mapping[str, float]]:
         """Return mapping of action name to action value for each building."""
