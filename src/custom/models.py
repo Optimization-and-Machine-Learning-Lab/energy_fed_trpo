@@ -268,6 +268,11 @@ class MLP(nn.Sequential):
                 "indexes": [],
                 "layers": []
             },
+            "pricing": {
+                "keys": ["pricing", "predicted"],
+                "indexes": [],
+                "layers": []
+            },
             "other": {
                 "indexes": [],
                 "layers": []
@@ -286,10 +291,14 @@ class MLP(nn.Sequential):
             
             if any(key in name for key in in_feature_grouping["environment"]["keys"]):
                 in_feature_grouping["environment"]["indexes"].append(i)
+
+            if any(key in name for key in in_feature_grouping["pricing"]["keys"]):
+                in_feature_grouping["pricing"]["indexes"].append(i)
             
-            if not any(key in name for key in in_feature_grouping["encoded_demand"]["keys"]) and \
-               not any(key in name for key in in_feature_grouping["encoded_solar"]["keys"]) and \
-               not any(key in name for key in in_feature_grouping["environment"]["keys"]):
+            if  not any(key in name for key in in_feature_grouping["encoded_demand"]["keys"]) and \
+                not any(key in name for key in in_feature_grouping["encoded_solar"]["keys"]) and \
+                not any(key in name for key in in_feature_grouping["environment"]["keys"]) and \
+                not any(key in name for key in in_feature_grouping["pricing"]["keys"]): 
                 
                 in_feature_grouping["other"]["indexes"].append(i)
 

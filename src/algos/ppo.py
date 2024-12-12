@@ -181,7 +181,7 @@ def create_loss_module(policy, critic, env, clip_epsilon, entropy_eps, gamma, lm
     return loss_module
 
 def train_policy(
-    policy, env, eval_env, n_iters, local_epochs, collector, loss_module, replay_buffer, frames_per_batch, minibatch_size,
+    policy, env, eval_env, n_iters, local_epochs, loss_module, frames_per_batch, minibatch_size,
     max_grad_norm, optim, logger
 ):
 
@@ -205,204 +205,214 @@ def train_policy(
         }
     }
 
-    episode_reward_mean_list = []
-    episode_reward_mean_list_eval = []
-
     best_policy = None
     best_eval_reward = -float("inf")
 
     GAE = loss_module.value_estimator
 
-    with tqdm(total=n_iters, nrows=10, desc="episode: 0, reward_mean: 0, eval_reward_mean: 0") as pbar:
+    try:
 
-        episode = 0
+        with tqdm(total=n_iters, nrows=10, desc="episode: 0, reward_mean: 0, eval_reward_mean: 0") as pbar:
 
-        for tensordict_data in collector:
+            for episode in range(n_iters):
 
-            tensordict_data.set(
-                ("next", "agents", "done"),
-                tensordict_data.get(("next", "done"))
-                .unsqueeze(-1)
-                .repeat(1, 1, env.n_agents)
-                .unsqueeze(-1)
-                .expand(tensordict_data.get_item_shape(("next", env.reward_key))),
-            )
-            tensordict_data.set(
-                ("next", "agents", "terminated"),
-                tensordict_data.get(("next", "terminated"))
-                .unsqueeze(-1)
-                .repeat(1, 1, env.n_agents)
-                .unsqueeze(-1)
-                .expand(tensordict_data.get_item_shape(("next", env.reward_key))),
-            )
-
-            # We need to expand the done and terminated to match the reward shape (this is expected by the value estimator)
-
-            with torch.no_grad():
-                GAE(
-                    tensordict_data,
-                    params=loss_module.critic_network_params,
-                    target_params=loss_module.target_critic_network_params,
-                )  # Compute GAE and add it to the data
-
-            data_view = tensordict_data.reshape(-1)  # Flatten the batch size to shuffle data
-            replay_buffer.extend(data_view)
-
-            # Run local steps
-
-            loss_metrics = {
-                "train/loss_objective": 0,
-                "train/loss_critic": 0,
-                "train/loss_entropy": 0,
-            }
-
-            for _ in range(local_epochs):
-
-                for _ in range(frames_per_batch // minibatch_size):
-
-                    subdata = replay_buffer.sample()
-                    loss_vals = loss_module(subdata)
-
-                    loss_value = (
-                        loss_vals["loss_objective"]
-                        + loss_vals["loss_critic"]
-                        + loss_vals["loss_entropy"]
-                    )
-
-                    loss_value.backward()
-
-                    try:
-                        torch.nn.utils.clip_grad_norm_(
-                            loss_module.parameters(), max_grad_norm, error_if_nonfinite=True
-                        )  # Optional
-                    except RuntimeError as e:
-                        print(f"Gradient clipping error: {e}")
-                        return best_policy, episode_reward_mean_list, episode_reward_mean_list_eval
-
-                    optim.step()
-                    optim.zero_grad()
-
-                    # Accumulate loss values
-                    loss_metrics["train/loss_objective"] += loss_vals["loss_objective"].item()
-                    loss_metrics["train/loss_critic"] += loss_vals["loss_critic"].item()
-                    loss_metrics["train/loss_entropy"] += loss_vals["loss_entropy"].item()
-
-            # Compute mean loss values
-
-            num_updates = local_epochs * (frames_per_batch // minibatch_size)
-            loss_metrics = {k: v / num_updates for k, v in loss_metrics.items()}
-
-            # Evaluating
-
-            with torch.no_grad():
-
-                policy.eval()
-
-                eval_collector = sample_data(
-                    env=eval_env, policy=policy, device=policy.device, frames_per_batch=minibatch_size, n_iters=1
+                # Configure data collection
+                collector = sample_data(
+                    env=env, policy=policy, device=policy.device, frames_per_batch=frames_per_batch, n_iters=1
                 )
 
-                for rollout in eval_collector:
+                # Create replay buffer
+                replay_buffer = create_replay_buffer(
+                    frames_per_batch=frames_per_batch, device=policy.device, minibatch_size=minibatch_size
+                )
 
-                    done = rollout.get(
-                        ("next", "done")
-                    ).unsqueeze(-1).repeat(1, 1, env.n_agents).unsqueeze(-1).expand(rollout.get_item_shape(("next", env.reward_key)))
+                # Collect data
 
-                    # Compute mean reward
+                for tensordict_data in collector:
 
-                    episode_reward_mean_eval = rollout.get(("next", "agents", "episode_reward"))[done].mean().item()
+                    tensordict_data.set(
+                        ("next", "agents", "done"),
+                        tensordict_data.get(("next", "done"))
+                        .unsqueeze(-1)
+                        .repeat(1, 1, env.n_agents)
+                        .unsqueeze(-1)
+                        .expand(tensordict_data.get_item_shape(("next", env.reward_key))),
+                    )
+                    tensordict_data.set(
+                        ("next", "agents", "terminated"),
+                        tensordict_data.get(("next", "terminated"))
+                        .unsqueeze(-1)
+                        .repeat(1, 1, env.n_agents)
+                        .unsqueeze(-1)
+                        .expand(tensordict_data.get_item_shape(("next", env.reward_key))),
+                    )
 
-                    # Compute mean cost and emissions
+                    # We need to expand the done and terminated to match the reward shape (this is expected by the value estimator)
 
-                    cost_eval = rollout.get(
-                        ("next", "agents", "info", "cost")
-                    )[done].mean().item()
-                    cost_without_storage_eval = rollout.get(
-                        ("next", "agents", "info", "cost_without_storage")
-                    )[done].mean().item()
-                    emissions_eval = rollout.get(
-                        ("next", "agents", "info", "emissions")
-                    )[done].mean().item()
-                    emissions_without_storage_eval = rollout.get(
-                        ("next", "agents", "info", "emissions_without_storage")
-                    )[done].mean().item()
+                    with torch.no_grad():
+                        GAE(
+                            tensordict_data,
+                            params=loss_module.critic_network_params,
+                            target_params=loss_module.target_critic_network_params,
+                        )  # Compute GAE and add it to the data
+
+                        data_view = tensordict_data.reshape(-1)  # Flatten the batch size to shuffle data
+                        replay_buffer.extend(data_view)
+
+                        # Get train metrics
+
+                        done = tensordict_data.get(("next", "agents", "done"))
+
+                        # Compute mean reward
+
+                        episode_reward_mean = (
+                            tensordict_data.get(("next", "agents", "episode_reward"))[done].mean().item()
+                        )
+
+                        # Compute mean cost and emissions
+
+                        cost = tensordict_data.get(
+                            ("next", "agents", "info", "cost")
+                        )[done].mean().item()
+                        cost_without_storage = tensordict_data.get(
+                            ("next", "agents", "info", "cost_without_storage")
+                        )[done].mean().item()
+                        emissions = tensordict_data.get(
+                            ("next", "agents", "info", "emissions")
+                        )[done].mean().item()
+                        emissions_without_storage = tensordict_data.get(
+                            ("next", "agents", "info", "emissions_without_storage")
+                        )[done].mean().item()
+
+                        # Evaluating
+
+                        policy.eval()
+
+                        eval_collector = sample_data(
+                            env=eval_env, policy=policy, device=policy.device, frames_per_batch=minibatch_size, n_iters=1
+                        )
+
+                        for rollout in eval_collector:
+
+                            done = rollout.get(
+                                ("next", "done")
+                            ).unsqueeze(-1).repeat(1, 1, env.n_agents).unsqueeze(-1).expand(rollout.get_item_shape(("next", env.reward_key)))
+
+                            # Compute mean reward
+
+                            episode_reward_mean_eval = rollout.get(("next", "agents", "episode_reward"))[done].mean().item()
+
+                            # Compute mean cost and emissions
+
+                            cost_eval = rollout.get(
+                                ("next", "agents", "info", "cost")
+                            )[done].mean().item()
+                            cost_without_storage_eval = rollout.get(
+                                ("next", "agents", "info", "cost_without_storage")
+                            )[done].mean().item()
+                            emissions_eval = rollout.get(
+                                ("next", "agents", "info", "emissions")
+                            )[done].mean().item()
+                            emissions_without_storage_eval = rollout.get(
+                                ("next", "agents", "info", "emissions_without_storage")
+                            )[done].mean().item()
+
+                            # Add to the output
+
+                            summary["eval"]["reward"].append(episode_reward_mean_eval)
+                            summary["eval"]["cost"].append(cost_eval)
+                            summary["eval"]["cost_without_storage"].append(cost_without_storage_eval)
+                            summary["eval"]["emissions"].append(emissions_eval)
+                            summary["eval"]["emissions_without_storage"].append(emissions_without_storage_eval)
+
+                        policy.train()
+
+                    # Save best policy
+
+                    if episode_reward_mean_eval > best_eval_reward:
+
+                        best_eval_reward = episode_reward_mean_eval
+                        best_policy = copy.deepcopy(policy)
+
+                    # Run local steps
+
+                    loss_metrics = {
+                        "train/loss_objective": 0,
+                        "train/loss_critic": 0,
+                        "train/loss_entropy": 0,
+                    }
+
+                    for _ in range(local_epochs):
+
+                        for _ in range(frames_per_batch // minibatch_size):
+
+                            subdata = replay_buffer.sample()
+                            loss_vals = loss_module(subdata)
+
+                            loss_value = (
+                                loss_vals["loss_objective"]
+                                + loss_vals["loss_critic"]
+                                + loss_vals["loss_entropy"]
+                            )
+
+                            loss_value.backward()
+
+                            try:
+                                torch.nn.utils.clip_grad_norm_(
+                                    loss_module.parameters(), max_grad_norm, error_if_nonfinite=True
+                                )  # Optional
+                            except RuntimeError as e:
+                                print(f"Gradient clipping error: {e}")
+                                return best_policy, summary
+
+                            optim.step()
+                            optim.zero_grad()
+
+                            # Accumulate loss values
+                            loss_metrics["train/loss_objective"] += loss_vals["loss_objective"].item()
+                            loss_metrics["train/loss_critic"] += loss_vals["loss_critic"].item()
+                            loss_metrics["train/loss_entropy"] += loss_vals["loss_entropy"].item()
+
+                    # Compute mean loss values
+
+                    num_updates = local_epochs * (frames_per_batch // minibatch_size)
+                    loss_metrics = {k: v / num_updates for k, v in loss_metrics.items()}
 
                     # Add to the output
 
-                    summary["eval"]["reward"].append(episode_reward_mean_eval)
-                    summary["eval"]["cost"].append(cost_eval)
-                    summary["eval"]["cost_without_storage"].append(cost_without_storage_eval)
-                    summary["eval"]["emissions"].append(emissions_eval)
-                    summary["eval"]["emissions_without_storage"].append(emissions_without_storage_eval)
+                    summary["train"]["reward"].append(episode_reward_mean)
+                    summary["train"]["loss_objective"].append(loss_metrics["train/loss_objective"])
+                    summary["train"]["loss_critic"].append(loss_metrics["train/loss_critic"])
+                    summary["train"]["loss_entropy"].append(loss_metrics["train/loss_entropy"])
+                    summary["train"]["cost"].append(cost)
+                    summary["train"]["cost_without_storage"].append(cost_without_storage)
+                    summary["train"]["emissions"].append(emissions)
+                    summary["train"]["emissions_without_storage"].append(emissions_without_storage)
 
-                policy.train()
+                    # Log with the experiment logger
 
-            # Save best policy
+                    logger.log(
+                        {
+                            **loss_metrics,
+                            "train/reward_mean": episode_reward_mean,
+                            "train/cost_mean": cost,
+                            "train/cost_without_storage": cost_without_storage,
+                            "train/emissions_mean": emissions,
+                            "train/emissions_without_storage": emissions_without_storage,
+                            "eval/reward_mean": episode_reward_mean_eval,
+                            "eval/cost_mean": cost_eval,
+                            "eval/cost_without_storage": cost_without_storage_eval,
+                            "eval/emissions_mean": emissions_eval,
+                            "eval/emissions_without_storage": emissions_without_storage_eval
+                        },
+                        step=episode,
+                    )
 
-            if episode_reward_mean_eval > best_eval_reward:
+                pbar.set_description(f"episode: {episode}, reward_mean: {episode_reward_mean}, eval_reward_mean: {episode_reward_mean_eval}")
+                pbar.update()
 
-                best_eval_reward = episode_reward_mean_eval
-                best_policy = copy.deepcopy(policy)
-
-            # Get train metrics
-
-            done = tensordict_data.get(("next", "agents", "done"))
-
-            # Compute mean reward
-
-            episode_reward_mean = (
-                tensordict_data.get(("next", "agents", "episode_reward"))[done].mean().item()
-            )
-
-            # Compute mean cost and emissions
-
-            cost = tensordict_data.get(
-                ("next", "agents", "info", "cost")
-            )[done].mean().item()
-            cost_without_storage = tensordict_data.get(
-                ("next", "agents", "info", "cost_without_storage")
-            )[done].mean().item()
-            emissions = tensordict_data.get(
-                ("next", "agents", "info", "emissions")
-            )[done].mean().item()
-            emissions_without_storage = tensordict_data.get(
-                ("next", "agents", "info", "emissions_without_storage")
-            )[done].mean().item()
-
-            # Add to the output
-
-            summary["train"]["reward"].append(episode_reward_mean)
-            summary["train"]["loss_objective"].append(loss_metrics["train/loss_objective"])
-            summary["train"]["loss_critic"].append(loss_metrics["train/loss_critic"])
-            summary["train"]["loss_entropy"].append(loss_metrics["train/loss_entropy"])
-            summary["train"]["cost"].append(cost)
-            summary["train"]["cost_without_storage"].append(cost_without_storage)
-            summary["train"]["emissions"].append(emissions)
-            summary["train"]["emissions_without_storage"].append(emissions_without_storage)
-
-            # Log with the experiment logger
-
-            logger.log(
-                {
-                    **loss_metrics,
-                    "train/reward_mean": episode_reward_mean,
-                    "train/cost_mean": cost,
-                    "train/cost_without_storage": cost_without_storage,
-                    "train/emissions_mean": emissions,
-                    "train/emissions_without_storage": emissions_without_storage,
-                    "eval/reward_mean": episode_reward_mean_eval,
-                    "eval/cost_mean": cost_eval,
-                    "eval/cost_without_storage": cost_without_storage_eval,
-                    "eval/emissions_mean": emissions_eval,
-                    "eval/emissions_without_storage": emissions_without_storage_eval
-                },
-                step=episode,
-            )
-
-            episode += 1
-
-            pbar.set_description(f"episode: {episode}, reward_mean: {episode_reward_mean}, eval_reward_mean: {episode_reward_mean_eval}")
-            pbar.update()
+    except KeyboardInterrupt:
+        print("Training interrupted. Returning the best policy and summary so far.")
 
     return best_policy, summary
 
@@ -497,12 +507,6 @@ if __name__ == '__main__':
 
     logger.watch_model([policy, critic])
 
-    # Configure data collection
-    collector = sample_data(env=train_env, policy=policy, device=device, frames_per_batch=frames_per_batch, n_iters=args.iterations)
-
-    # Create replay buffer
-    replay_buffer = create_replay_buffer(frames_per_batch=frames_per_batch, device=device, minibatch_size=minibatch_size)
-
     # Create loss module
     loss_module = create_loss_module(
         policy=policy, critic=critic, env=train_env, clip_epsilon=args.clip_epsilon, entropy_eps=args.entropy_eps, gamma=args.gamma,
@@ -518,9 +522,7 @@ if __name__ == '__main__':
         policy=policy,
         eval_env=eval_env,
         n_iters=args.iterations,
-        collector=collector,
         loss_module=loss_module,
-        replay_buffer=replay_buffer,
         local_epochs=args.epochs,
         frames_per_batch=frames_per_batch,
         minibatch_size=minibatch_size,

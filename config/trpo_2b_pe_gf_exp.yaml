@@ -1,0 +1,38 @@
+name: fed_avg_trpo_2_b_pe_gf_exp
+entity: optimllab
+project: fed_rl_energy
+program: src/algos/trpo.py
+command:
+- ${env}
+- ${interpreter}
+- ${program}
+- ${args}
+- --wandb_logging
+- --personal_encoding
+- --share_parameters_policy
+- --share_parameters_critic
+- --multiagent_ppo
+- --group_features
+method: grid
+metric:
+  goal: maximize
+  name: eval/reward_mean
+parameters:
+  data_path:
+    value: ./data/naive_2_buildings_simple/
+  device:
+    value: cuda
+  reward:
+    value: "weighted_cost_emissions"
+  iterations:
+    values: [5, 10, 15]
+  seed:
+    values: [0, 1, 2, 3, 4]
+  learning_rate:
+    value: 0.0001
+  epochs:
+    values: [1, 2, 5]
+  days_in_iter:
+    values: [5000, 10000]
+  days_in_batch:
+    value: 1000

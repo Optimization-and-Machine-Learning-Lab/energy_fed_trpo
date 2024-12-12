@@ -25,7 +25,9 @@ ACTIVE_OBSERVATIONS = [
     'direct_solar_irradiance_predicted_6h',
     'direct_solar_irradiance_predicted_12h',
     'direct_solar_irradiance_predicted_24h',
-    'selling_price'
+    'electricity_pricing',
+    'selling_pricing',
+    'carbon_intensity'
 ]
 
 def get_exp_envs(data_path: str = "data/naive_data/", **kwargs):

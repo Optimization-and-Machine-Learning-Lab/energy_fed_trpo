@@ -47,12 +47,28 @@ def plot_rewards_and_actions(
     eval_emissions = summary['eval']['emissions']
     eval_emissions_without_storage = summary['eval']['emissions_without_storage']
 
+    # Save a backup of all the data in the save path in a csv file
+
+    with open(save_path + 'summary.csv', 'w') as f:
+        f.write(
+            'train_rewards,train_costs,train_costs_without_storage,train_emissions,train_emissions_without_storage,'
+            'eval_rewards,eval_costs,eval_costs_without_storage,eval_emissions,eval_emissions_without_storage\n'
+        )
+        for i in range(len(train_rewards)):
+            f.write(
+                f'{train_rewards[i]},{train_costs[i]},{train_costs_without_storage[i]},{train_emissions[i]},{train_emissions_without_storage[i]},'
+                f'{eval_rewards[i]},{eval_costs[i]},{eval_costs_without_storage[i]},{eval_emissions[i]},{eval_emissions_without_storage[i]}\n'
+            )
+
+
     # Setup the logger
     logger = GeneralLogger()
 
     # Manage the case when we call the logger from a notebook (not Wandb logging)
     if not logger._initialized:
-        logger.setup({}) # Init by default
+        logger.setup({
+            'logging_path': save_path
+        }) # Init by default
 
     # Plot rewards, costs, and emissions
     fig, axs = plt.subplots(1 + 2 * train_env.n_agents, 3, figsize=(18, 8 + 4 * train_env.n_agents))
@@ -132,6 +148,7 @@ def plot_rewards_and_actions(
         eval_opt_soc = torch.tensor(np.array(eval_env.cl_env.unwrapped.optimal_soc), requires_grad=False).swapaxes(0, 1)
 
     for i in range(train_env.n_agents):
+
         # Plot train data for each building
         row = 1 + i
         axs[row, 0].plot(train_net_electricity_consumption[i], label=f"Train Agent {i} Net Electricity Consumption")
@@ -490,7 +507,8 @@ if __name__ == '__main__':
         'direct_solar_irradiance_predicted_6h',
         'direct_solar_irradiance_predicted_12h',
         'direct_solar_irradiance_predicted_24h',
-        'selling_price'
+        'electricity_pricing',
+        'selling_pricing'
     ]
 
     data_path = 'data/naive_data/'

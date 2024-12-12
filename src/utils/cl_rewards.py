@@ -324,7 +324,7 @@ class WeightedCostAndEmissions(RewardFunction):
         """
 
         super().__init__(env_metadata)
-        self.emissions_weight = 0.5
+        self.emissions_weight = 0.6
         self.cost_weight = 1 - self.emissions_weight
         self.last_soc = None
 
@@ -395,15 +395,13 @@ class WeightedCostAndEmissions(RewardFunction):
 
             # Penalize if charging or discharging the battery beyond battery's limits
 
-            if (last_action > 0 and last_action > (1 - prev_soc)) or (last_action < 0 and abs(last_action) > prev_soc):
-                pen_bad_batt_use = (
-                    abs((1 - prev_soc) - last_action) if last_action > 0 else abs(prev_soc + last_action)
-                ) * battery_capacity
+            pen_bad_batt_use = max(0, last_action - (1 - prev_soc)) if last_action > 0 else max(0, abs(last_action) - prev_soc)
+            pen_bad_batt_use *= battery_capacity
 
             # Compute reward
 
             cost = max(net + pen_bad_batt_use, 0) * electricity_pricing
-            cost += min(net, 0) * selling_pricing
+            cost += min(net + pen_bad_batt_use, 0) * selling_pricing
             emissions = max(net + pen_bad_batt_use, 0) * carbon_intensity
 
             reward = -(self.cost_weight * cost + self.emissions_weight * emissions)

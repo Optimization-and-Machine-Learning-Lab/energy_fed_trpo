@@ -34,7 +34,7 @@ class GeneralLogger:
         self.wdb_log = config.get("wdb_log", False)
         self.csv_log = config.get("csv_log", False)
         self.console_log = config.get("console_log", False)
-        self.logging_path = config.get("logging_path", './logs')
+        self.logging_path = config.get("logging_path", './logs/')
         self.exp_config = config.get("exp_config", None)
 
         # Wandb related configurations
@@ -60,10 +60,10 @@ class GeneralLogger:
  
     def dict_to_csv(self, data: dict):
 
-        file_path = f'{self.logging_path}log.csv' if not self.wdb_log else f'{self.wdb_run.dir}log.csv'
+        file_path = f'{self.logging_path}log.csv' if not self.wdb_log else f'{self.wdb_run.dir}/log.csv'
         file_exists = os.path.isfile(file_path)
         
-        with open(file_path, "a") as csv_file:
+        with open(file_path, "w") as csv_file:
 
             # Write headers if file does not exist
             if not file_exists:
@@ -119,7 +119,7 @@ class GeneralLogger:
 
         # Write the experiment configuration to a file
 
-        file_path = f'{self.logging_path}/exp_config.txt' if not self.wdb_log else f'{self.wdb_run.dir}/exp_config.txt'
+        file_path = f'{self.logging_path}exp_config.txt' if not self.wdb_log else f'{self.wdb_run.dir}exp_config.txt'
 
         with open(file_path, 'w') as f:
             f.write(str(self.exp_config))
