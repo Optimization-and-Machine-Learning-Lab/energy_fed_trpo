@@ -11,11 +11,9 @@
 #SBATCH -p cscc-gpu-p
 #SBATCH -q cscc-gpu-qos
 
-# Load necessary modules
-module load anaconda3
-
-# Activate the desired conda environment
-source activate rl_energy
+# !!!!!!!!!
+# !!!   Remember to load the conda environment before running the script and setting the PYTHONPATH (pp)
+# !!!!!!!!!
 
 # W&B Parameters
 export WANDB_PROJECT="fed_rl_energy"

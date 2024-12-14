@@ -587,6 +587,7 @@ if __name__ == '__main__':
         summary=summary,
         save=True,
         save_path=logging_path,
+        show=False
     )
 
     # Backup in wandb some relevant files and the summary
