@@ -1,0 +1,39 @@
+name: fed_avg_ppo_5_b_gf_exp
+entity: optimllab
+project: fed_rl_energy
+program: src/algos/trpo.py
+command:
+- ${env}
+- ${interpreter}
+- ${program}
+- ${args}
+- --wandb_logging
+- --share_parameters_policy
+- --share_parameters_critic
+- --multiagent_ppo
+- --group_features
+method: bayes
+metric:
+  goal: maximize
+  name: eval/reward_mean
+parameters:
+  data_path:
+    value: ./data/naive_5_buildings_simple/
+  device:
+    value: cuda
+  reward:
+    value: "weighted_cost_emissions"
+  iterations:
+    values: [5, 10, 15]
+  seed:
+    values: [0, 1, 2, 3, 4]
+  learning_rate:
+    value: 0.0001
+  epochs:
+    value: [1, 2, 5]
+  days_in_iter:
+    value: 5000
+  days_in_batch:
+    value: 1000
+  entropy_eps:
+    value: 0.0001

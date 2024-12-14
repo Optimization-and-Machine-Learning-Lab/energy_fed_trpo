@@ -205,7 +205,7 @@ def train_policy(
         }
     }
 
-    best_policy = None
+    best_policy = copy.deepcopy(policy)
     best_eval_reward = -float("inf")
 
     GAE = loss_module.value_estimator
@@ -531,6 +531,10 @@ if __name__ == '__main__':
         logger=logger
     )
 
+    # Save the best policy
+
+    torch.save(policy, f"{logging_path}best_policy.pth")
+
     # Plot rewards and actions with the correct methods
 
     plot_rewards_and_actions(
@@ -541,6 +545,10 @@ if __name__ == '__main__':
         save=True,
         save_path=logging_path,
     )
+
+    # Backup in wandb some relevant files and the summary
+
+    logger.wdb_save(f"{logging_path}*")
 
     # Close the logger
 

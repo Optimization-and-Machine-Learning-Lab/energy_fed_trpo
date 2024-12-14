@@ -44,8 +44,10 @@ def get_exp_envs(data_path: str = "data/naive_data/", **kwargs):
     is_fork = multiprocessing.get_start_method() == "fork"
 
     device = (
-        torch.device(gpu_device_ix)
-        if torch.cuda.is_available() and not is_fork and device != "cpu"
+        torch.device(f"cuda:{gpu_device_ix}")
+        if torch.cuda.is_available() and not is_fork and device == "cuda"
+        else torch.device("mps")
+        if torch.backends.mps.is_available() and device == "mps"
         else torch.device("cpu")
     )
 

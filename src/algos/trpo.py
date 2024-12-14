@@ -204,7 +204,7 @@ def train_policy(
         }
     }
 
-    best_policy = None
+    best_policy = copy.deepcopy(policy)
     best_eval_reward = -float("inf")
 
     GAE = loss_module.value_estimator
@@ -462,6 +462,16 @@ def parse_args():
     parser.add_argument("-spc", "--share_parameters_critic", action="store_true", help="Share parameters across agents for the critic network")
     parser.add_argument("-mappo", "--multiagent_ppo", action="store_true", help="Use multi-agent PPO")
     parser.add_argument("-mg", "--max_grad_norm", type=float, default=1.0, help="Maximum norm for the gradients")
+    parser.add_argument("-itr", "--initial_trust_radius", type=float, default=0.005, help="Initial trust region radius")
+    parser.add_argument("-mtr", "--max_trust_radius", type=float, default=2, help="Maximum trust region radius")
+    parser.add_argument("-eta", "--eta", type=float, default=0.15, help="Trust region update factor")
+    parser.add_argument("-ke", "--kappa_easy", type=float, default=0.01, help="Trust region update factor for easy cases")
+    parser.add_argument("-mni", "--max_newton_iter", type=int, default=150, help="Maximum number of Newton iterations")
+    parser.add_argument("-mkd", "--max_krylov_dim", type=int, default=150, help="Maximum Krylov dimension")
+    parser.add_argument("-lt", "--lanczos_tol", type=float, default=1e-5, help="Lanczos tolerance")
+    parser.add_argument("-gt", "--gtol", type=float, default=1e-5, help="Gradient tolerance")
+    parser.add_argument("-ha", "--hutchinson_approx", action="store_true", help="Use Hutchinson approximation")
+    parser.add_argument("-om", "--opt_method", type=str, default="krylov", help="Optimization method (krylov or cg)")
 
     args = parser.parse_args()
 
@@ -522,9 +532,6 @@ if __name__ == '__main__':
 
     logger.watch_model([policy, critic])
 
-    # Configure data collection
-    collector = sample_data(env=train_env, policy=policy, device=device, frames_per_batch=frames_per_batch, n_iters=args.iterations)
-
     # Create replay buffer
     replay_buffer = create_replay_buffer(frames_per_batch=frames_per_batch, device=device, minibatch_size=minibatch_size)
 
@@ -535,10 +542,17 @@ if __name__ == '__main__':
 
     # Create optimizers
     optim_policy = TrustRegion(
-        loss_module.actor_network.parameters(), max_trust_radius=2, initial_trust_radius=.005,
-        eta=0.15, kappa_easy=0.01, max_newton_iter=150, max_krylov_dim=150,
-        lanczos_tol=1e-5, gtol=1e-05, hutchinson_approx=True,
-        opt_method='krylov'
+        loss_module.actor_network.parameters(),
+        max_trust_radius=args.max_trust_radius,
+        initial_trust_radius=args.initial_trust_radius,
+        eta=args.eta,
+        kappa_easy=args.kappa_easy,
+        max_newton_iter=args.max_newton_iter,
+        max_krylov_dim=args.max_krylov_dim,
+        lanczos_tol=args.lanczos_tol,
+        gtol=args.gtol,
+        hutchinson_approx=args.hutchinson_approx,
+        opt_method=args.opt_method
     )
     optim_critic = torch.optim.Adam(params=loss_module.parameters(), lr=args.learning_rate)
 
@@ -548,7 +562,6 @@ if __name__ == '__main__':
         policy=policy,
         eval_env=eval_env,
         n_iters=args.iterations,
-        collector=collector,
         loss_module=loss_module,
         replay_buffer=replay_buffer,
         local_epochs_policy=args.policy_epochs,
@@ -560,6 +573,10 @@ if __name__ == '__main__':
         optim_critic=optim_critic,
         logger=logger
     )
+    
+    # Save the best policy
+
+    torch.save(policy, f"{logging_path}best_policy.pth")
 
     # Plot rewards and actions with the correct methods
 
@@ -572,6 +589,9 @@ if __name__ == '__main__':
         save_path=logging_path,
     )
 
+    # Backup in wandb some relevant files and the summary
+
+    logger.wdb_save(f"{logging_path}*")
     # Close the logger
 
     logger.finish()

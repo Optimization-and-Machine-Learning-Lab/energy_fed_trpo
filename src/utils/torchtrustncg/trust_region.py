@@ -125,7 +125,7 @@ class TrustRegion(optim.Optimizer):
         loss_module, data_sample = closure(backward=True)
 
         gradient = torch.autograd.grad(loss_module._log_weight(data_sample)[2].mean(), self._params, create_graph=True)
-        gradient = torch.cat([grad.view(-1) for grad in gradient])
+        gradient = torch.cat([grad.reshape(-1) for grad in gradient])
 
         hess_vp = autograd.grad(
             torch.sum(gradient * p, dim=-1), self._params,
@@ -566,7 +566,7 @@ class TrustRegion(optim.Optimizer):
         # Compute gradient like this to avoid memory leaks
 
         kl_grad = torch.autograd.grad(loss_module(data_sample)['loss_objective'], self._params, create_graph=True)
-        flat_grad = torch.cat([grad.view(-1) for grad in kl_grad])
+        flat_grad = torch.cat([grad.reshape(-1) for grad in kl_grad])
 
         # starting_loss = closure(backward=True)
         # starting_loss, fn_kl, data_sample = closure(backward=True)

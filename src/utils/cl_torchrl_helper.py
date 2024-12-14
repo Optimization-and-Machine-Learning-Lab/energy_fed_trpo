@@ -258,12 +258,13 @@ def plot_rewards_and_actions(
 
     # Plot only if there is a graphical interface
     plt.show()
+    plt.close()
 
     # Consider saving the figure
     if save:
         fig.savefig(save_path + 'results.png')
 
-def create_env(env_config, device, seed):
+def create_env(env_config, device, seed, dynamic=False):
     
     env = CityLearnMultiAgentEnv(
         env_config=env_config,

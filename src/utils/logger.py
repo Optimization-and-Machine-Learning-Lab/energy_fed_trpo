@@ -63,7 +63,7 @@ class GeneralLogger:
         file_path = f'{self.logging_path}log.csv' if not self.wdb_log else f'{self.wdb_run.dir}/log.csv'
         file_exists = os.path.isfile(file_path)
         
-        with open(file_path, "w") as csv_file:
+        with open(file_path, "a") as csv_file:
 
             # Write headers if file does not exist
             if not file_exists:
@@ -100,9 +100,9 @@ class GeneralLogger:
         if self.wdb_log:
             wandb.watch(models=models)
 
-    def wdb_save_model(self):
+    def wdb_save(self, path):
         if self.wdb_log:
-            wandb.save('model.pt')
+            wandb.save(path)
 
     def wdb_load_model(self):
         if self.wdb_log:
