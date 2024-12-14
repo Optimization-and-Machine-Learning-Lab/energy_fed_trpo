@@ -30,7 +30,7 @@ from citylearn.wrappers import (
 )
 
 def plot_rewards_and_actions(
-    policy, train_env, eval_env, summary, save: bool = False, save_path: str = None
+    policy, train_env, eval_env, summary, save: bool = False, save_path: str = None, show: bool = True
 ):
 
     # Extract the rewards, costs, and emissions
@@ -256,9 +256,11 @@ def plot_rewards_and_actions(
     plt.suptitle(f'Results for day {train_env.cl_env.unwrapped.episode_tracker.episode_start_time_step // 24}')
     plt.tight_layout()
 
-    # Plot only if there is a graphical interface
-    plt.show()
-    plt.close()
+    if show:
+
+        # Plot only if there is a graphical interface
+        plt.show()
+        plt.close()
 
     # Consider saving the figure
     if save:
