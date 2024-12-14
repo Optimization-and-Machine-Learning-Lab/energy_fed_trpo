@@ -6,5 +6,8 @@ logs/
 
 # Ignore data files
 
+*.log
+*.err
+*.out
 .env
 /data
