@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=fed_rl_energy_ppo
-#SBATCH --output=R-%x.%j.out
-#SBATCH --error=R-%x.%j.err
+#SBATCH --output=logs/R-%x.%j.out
+#SBATCH --error=logs/R-%x.%j.err
 #SBATCH --nodes=1  # Request exactly one node
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4  # Adjust for better performance with 4 GPUs
-#SBATCH --gpus=1  # Allocate all 4 GPUs on the node
+#SBATCH --gpus=2  # Allocate all 4 GPUs on the node
 #SBATCH --mem=40G
 #SBATCH --time=12:00:00  # Maximum allowed time
 #SBATCH -p cscc-gpu-p
@@ -25,6 +25,10 @@ BUILDINGS=("2b" "5b")
 DATA_TYPES=("normal" "shifted")
 EXPERIMENTS=("base" "gf" "pe" "pe_gf")
 SESSIONS_PER_EXPERIMENT=2
+
+SESSION_NAMES=()
+CUDA_DEVICES=(0 1)
+CUDA_DEVICE_IX=0
 
 for BUILDING in "${BUILDINGS[@]}"; do
 
@@ -47,20 +51,23 @@ for BUILDING in "${BUILDINGS[@]}"; do
         
             for i in $(seq 1 $SESSIONS_PER_EXPERIMENT); do
 
-                SESSION_NAME="$ALGO-$EXPERIMENT-$i"
+                SESSION_NAME="$BUILDING-$ALGO-$EXPERIMENT-$DATA_TYPE-$i"
+                SESSION_NAMES+=("$SESSION_NAME")
 
                 # !!!!!!!!!
                 # !!!   Use this echo to check the command before running the sweeps
                 # !!!!!!!!!
                 
-                echo "tmux new-session -d -s $SESSION_NAME \"wandb agent $SWEEP_ID; tmux kill-session -t $SESSION_NAME\""
+                # echo "tmux new-session -d -s $SESSION_NAME \"conda activate rl_energy ; pp ; wandb agent $SWEEP_ID; tmux kill-session -t $SESSION_NAME\""
                 
                 # !!!!!!!!!
                 # !!!   Check previous comment
                 # !!!!!!!!!
 
                 # Start the W&B sweep agent in a new tmux session
-                # tmux new-session -d -s $SESSION_NAME "wandb agent $SWEEP_ID; tmux kill-session -t $SESSION_NAME"
+                tmux new-session -d -s $SESSION_NAME "export CUDA_VISIBLE_DEVICES=$(($CUDA_DEVICE_IX % 2)) ; wandb agent $SWEEP_ID; tmux kill-session -t $SESSION_NAME"
+
+                CUDA_DEVICE_IX=$((CUDA_DEVICE_IX + 1))
 
             done
 
@@ -69,3 +76,21 @@ for BUILDING in "${BUILDINGS[@]}"; do
     done
 
 done
+
+# Wait for all tmux sessions to finish
+while true; do
+    all_finished=true
+    for SESSION_NAME in "${SESSION_NAMES[@]}"; do
+        if tmux has-session -t $SESSION_NAME 2>/dev/null; then
+            all_finished=false
+            break
+        fi
+    done
+    if $all_finished; then
+        break
+    fi
+    sleep 10  # Check every 10 seconds
+done
+
+echo "All tmux sessions have finished."
+
