@@ -60,7 +60,7 @@ class GeneralLogger:
  
     def dict_to_csv(self, data: dict):
 
-        file_path = f'{self.logging_path}log.csv' if not self.wdb_log else f'{self.wdb_run.dir}/log.csv'
+        file_path = f'{self.logging_path}log.csv'
         file_exists = os.path.isfile(file_path)
         
         with open(file_path, "a") as csv_file:

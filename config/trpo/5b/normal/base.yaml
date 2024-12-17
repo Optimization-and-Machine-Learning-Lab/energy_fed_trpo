@@ -28,9 +28,14 @@ parameters:
     values: [0, 1, 2, 3, 4]
   learning_rate:
     value: 0.0001
-  epochs:
-    values: 20
+  policy_epochs:
+    value: 10
+  critic_epochs:
+    value: 10
   days_in_iter:
-    values: 500
+    value: 500
   days_in_batch:
     value: 500
+  opt_method:
+    value: cg
+  
