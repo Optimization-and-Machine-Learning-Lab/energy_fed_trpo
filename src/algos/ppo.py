@@ -424,7 +424,7 @@ def parse_args():
 
     parser.add_argument("-wl", "--wandb_logging", action="store_true", help="Use wandb for logging")
     parser.add_argument("-s", "--seed", type=int, default=0, help="Random seed for reproducibility")
-    parser.add_argument("-d", "--device", type=str, default="cpu", help="Device to use for training (cpu or cuda)")
+    parser.add_argument("-d", "--device", type=str, default="cpu", help="Device to use for training (cpu, mps or cuda)")
     parser.add_argument("-dp", "--data_path", type=str, default="data/naive_data/", help="Path to the data directory")
     parser.add_argument("-r", "--reward", type=str, default="cost", help="Reward type to use in the environment")
     parser.add_argument("-dc", "--day_count", type=int, default=1, help="Number of days to simulate in the environment")

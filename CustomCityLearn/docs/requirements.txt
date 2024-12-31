@@ -1,6 +1,0 @@
-jinja2==3.0.0
-Sphinx==4.5.0
-sphinxcontrib-bibtex
-sphinx-copybutton
-sphinxemoji
-sphinx-rtd-theme

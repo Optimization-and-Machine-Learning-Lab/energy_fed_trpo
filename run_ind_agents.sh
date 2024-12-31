@@ -1,2 +1,0 @@
-seed=0
-(trap 'kill 0' SIGINT; python TRPO/main.py --building-no 0 --seed $seed --wandb-log & python TRPO/main.py --building-no 1 --seed $seed --wandb-log & python TRPO/main.py --building-no 2 --seed $seed --wandb-log & python TRPO/main.py --building-no 3 --seed $seed --wandb-log & python TRPO/main.py --building-no 4 --seed $seed --wandb-log & wait)
