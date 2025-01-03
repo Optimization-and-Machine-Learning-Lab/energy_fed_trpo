@@ -18,7 +18,7 @@ This work addresses the challenge of optimal energy management in microgrids thr
 
 ## Prepare environment
 
-- Create a environment and install requirements running:
+- Create an environment and install requirements running:
 
   ```bash
   conda create --name <env> --file requirements.txt
