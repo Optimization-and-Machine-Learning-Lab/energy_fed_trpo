@@ -166,33 +166,9 @@ To launch the hyperparameters we found and reported in the paper:
     wandb: Enter your choice: 
   ```
 
-## Authors
-
-|              |                       🧑🏻 **Nicolás Cuadrado**                        |
-|--------------|:----------------------------------------------------------------------:|
-| **Github**   |              [@nicosquare](https://github.com/nicosquare)              |
-| **LinkedIn** | [@nicolascuadrado](https:\/\/www.linkedin.com\/in\/nicolascuadrado\/)  |
-| **Personal Site** | [nicolascuadrado.com](https:\/\/www.nicolascuadrado.com)  |
-
 ## Acknowledgements
 
-Thanks to [@vchoutas](https://github.com/vchoutas) because of the implementation of a PyTorch compatible trust-region optimizer that we modified to implement a very complete version of our TRPO method.
-
-## Citation
-
-This repository supports the work presented in the paper [Generalizing in Net-Zero Microgrids: A Study with Federated PPO and TRPO](https://arxiv.org/abs/2412.20946), you can cite the work as follows:
-
-```
-@misc{avila2024generalizingnetzeromicrogridsstudy,
-      title={Generalizing in Net-Zero Microgrids: A Study with Federated PPO and TRPO}, 
-      author={Nicolas M Cuadrado Avila and Samuel Horváth and Martin Takáč},
-      year={2024},
-      eprint={2412.20946},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2412.20946}, 
-}
-```
+Thanks to [@vchoutas](https://github.com/vchoutas) for the implementation of a PyTorch-compatible trust-region optimizer that we modified to implement a very complete version of our TRPO method.
 
 ## Show your support
 
@@ -200,5 +176,4 @@ Give a ⭐️ if this project helped you!
 
 ## 📝 License
 
-Copyright © 2024 [OptiMLLab, MBZUAI].<br />
 This project is [Apache License 2.0](https://apache.org/licenses/LICENSE-2.0.txt) licensed.
